@@ -1,19 +1,19 @@
 
 %% USER INPUT
 
-fileDir = '/Users/priscilla/OHSU Dropbox/Priscilla Ambrosi/Dropbox - Moss Lab/Lab - Data/Ephys/2024-12-05/2024_12_05_0000.abf';
+fileDir = '/Users/priscilla/OHSU Dropbox/Priscilla Ambrosi/Dropbox - Moss Lab/Lab - Data/Ephys/2024-12-05/2024_12_05_0023.abf';
 smoothSpan = 5;
 xMinInSec = 0;
 xMaxInSec = 1.75;
-minPeakHeight = -500;         % amplitude threshold
+minPeakHeight = 50;         % amplitude threshold
 minPeakDistance = 0.001;    % in seconds
 mainDataCh = 1;     % channel with recording from cell
 lightCh = 3;        % channel with opto stim
 cellAttached = 1;
 highpassThreshold = 100;
 lowpassThreshold = 1500; 
-yMin = -1500;
-yMax = 1500;
+yMin = -1000;
+yMax = 1000;
 
 
 %% MAIN CODE
