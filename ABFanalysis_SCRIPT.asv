@@ -1,273 +1,743 @@
+%{
+
+to do
+    write code to analyze current steps
+    double check ymin and ymax values within plots
+    create spreadsheets w data
+    extend xMaxInSec to 5s to get recovery of firing after o-stim
+    fix firing histogram
+
+%}
+
 
 %% USER INPUT
 
-fileDir = '/Users/priscilla/OHSU Dropbox/Priscilla Ambrosi/Dropbox - Moss Lab/Lab - Data/Ephys/2024-12-05/2024_12_05_0023.abf';
-smoothSpan = 5;
+databaseFile = '/Users/priscilla/OHSU Dropbox/Priscilla Ambrosi/Dropbox - Moss Lab/Lab - Data/Ephys Database.xlsx';
+firstRow = 13;
+lastRow = 13;
+analyzeOnlyOneRow = 1;
+
+% affects data analysis
+mainDataCh = 1;             % channel with recording from cell
+cmdCh = 2;                  % channel with voltage or current command
+blueLightCh = 3;            % channel with blue opto stim
+greenLightCh = 4;           % channel with green opto stim
+
+% affects data viz
 xMinInSec = 0;
-xMaxInSec = 1.75;
-minPeakHeight = 50;         % amplitude threshold
-minPeakDistance = 0.001;    % in seconds
-mainDataCh = 1;     % channel with recording from cell
-lightCh = 3;        % channel with opto stim
-cellAttached = 1;
+xMaxInSec = 2.5;
+xScaleBar = 100;
+yMinWC_VC = -500;
+yMaxWC_VC = 500;
+yScaleBarWC_VC = 100;
+yMinWC_CC = -100;
+yMaxWC_CC = 40;
+yScaleBarWC_CC = 10;
+yMinLS_CC = -10;
+yMaxLS_CC = 10;
+yScaleBarLS_CC = 1;
+yMinLS_VC = -1500;
+yMaxLS_VC = 1500;
+yScaleBarLS_VC = 100;
+ymaxhist = 50;
+
+% affects AP detection
+smoothSpan = 5;
 highpassThreshold = 100;
 lowpassThreshold = 1500; 
-yMin = -1000;
-yMax = 1000;
+minPeakDistance = 0.001;    % in seconds
+minPeakHeight_WC_CC = -20;
+minPeakHeight_LS_VC = 100;  % make code look for valleys instead of peaks
+minPeakHeight_LS_CC = 0.5;  % make code look for valleys instead of peaks
 
 
-%% MAIN CODE
+%% GATHER DATA FROM DATABASE
 
-% load ABF file
-[d,si,h]=abfload(fileDir);
+% save importing options so we can change them
+opts = detectImportOptions(databaseFile);
 
-% get file name
-fileName = fileDir(end-18:end-4);
+% change the variable type in column 11 (file_num) to char so that matlab
+% will actially read all the values in each cell. Why? Each cell is column
+% 11 can contain multiple numbers, separated by a comma. If you let matlab
+% do its auto variable type detection, it will interpret column 11 cells as
+% doubles and will import cells with multiple numbers as "NaN".
+% ALERT: change the column number if you add/remove database columns
+opts.VariableTypes(11) = {'char'};
 
-% convert sampling interval into sampling frequency
-% si is the sampling interval in us
-% samplingFrequency is in Hz
-samplingFrequency = 1000000/si;
+% read database file using custom options
+database = readtable(databaseFile, opts);
 
-% d is organized like this:
-% 1st column: data points (time series)
-% 2nd column: channel
-% 3rd column: sweep #
+% each row is one type of recording
+% one cell can be represented by multiple rows
+rows = height(database);
 
-% convert data points into seconds
-sweepDurationInSeconds = h.sweepLengthInPts/samplingFrequency;
-xAxis = linspace(0,sweepDurationInSeconds,h.sweepLengthInPts)';
+% is user specified
+if analyzeOnlyOneRow == 1
+    rows = firstRow;
+end
 
-% collect some simple info from header
-nSweeps = size(d,3);
-nChannels = size(h.recChNames,1);
 
-% find light stim info
-% rationale: I trigger the LED with a 5V digital pulse that is also
-% recorded by one of my analog inputs. I am looking for a big change in the
-% derivative of this channel.
-% ASSUMPTIONs: light stim is the same in all sweeps
-lightPulseStartInDataPts = find(diff(d(:,lightCh,1))>1);
-lightPulseStartInSecs = lightPulseStartInDataPts/samplingFrequency;
-lightPulseEndInDataPts = find(diff(d(:,lightCh,1))<-1);
-lightPulseEndInSecs = lightPulseEndInDataPts/samplingFrequency;
-lightPulseDurInSecs = lightPulseEndInSecs - lightPulseStartInSecs;
+%% PROCESS DATA FROM DATABASE
 
-% create matrix that will be filled
-yForMean=zeros(h.sweepLengthInPts,nSweeps);
+% iterate through every row
+for row=firstRow:rows
 
-% plot all the channels and sweeps
-figure('name',strcat(fileName,'_all'))
-for channel=1:nChannels
-    subplot(nChannels,1,channel)
-    for sweep=1:nSweeps
-        yFiltered = smooth(d(:,channel,sweep),smoothSpan);
-        yForMean(:,sweep) = yFiltered;
-        plot(xAxis,yFiltered,'Color',[0, 0, 0, 0.25]);
-        hold on;
+    % only look into cells that were NOT exluded
+    if cell2mat(database.excluded(row)) ~= 'y'
+
+        % collect basic info from database
+        mouseNumber = database.m(row);
+        % pad mouse number with zeros (if needed) to get 4 digits
+        mouseName = sprintf('m%04d',mouseNumber);  
+        % keep collecting info
+        mouseSex = cell2mat(database.sex(row));
+        dateRecorded = database.date_recorded(row);
+        cellName = cell2mat(database.cell(row));
+        opsinExpression = cell2mat(database.opsin_pos(row));
+        if opsinExpression == 'n'
+            opsinExpression = "OPSIN-NEG";
+        else
+            opsinExpression = "OPSIN-POS";
+        end
+        % set o-stim color based on LED used
+        LEDcolor = cell2mat(database.LED_color(row));
+        if LEDcolor == 'b'
+            ostimColor = [0 0.4470 0.7410];
+            lightCh = blueLightCh;
+        elseif LEDcolor == 'g'
+            ostimColor = [0.4660 0.6740 0.1880];
+            lightCh = greenLightCh;
+        else 
+            ostimColor = [1 1 1];
+            lightCh = blueLightCh;
+        end
+        LEDpower = sprintf('power%02d',database.LED_power(row));
+        recordingType = cell2mat(database.rec_type(row));
+
+        % collect basename of files in directory
+        abfFilesDir = cell2mat(database.dir(row));
+        abfFiles = dir(fullfile(abfFilesDir, '*.abf'));
+        abfFilesPrefix = abfFiles(1).name(1:end-8);
+
+        % collect file numbers to analyze
+        fileNumbers = str2double(split(database.file_num(row),','));
+
+        % iterate through all the file numbers listed for this experiment
+        % type
+        for file=fileNumbers'
+
+            % this is the name of the file that will be analyzed
+            abfFileName = strcat(abfFilesPrefix, sprintf('%04d.abf',file));
+
+            % make complete file name prefix for exporting data
+            str = [mouseName, mouseSex, cellName, opsinExpression, LEDcolor, LEDpower, recordingType, abfFileName];
+            prefix = join(str,'_');
+
+            % this is the full path to the file that will be analyzed
+            fileDir = fullfile(abfFilesDir,abfFileName);
+
+            % load ABF file
+            [d,si,h]=abfload(fileDir);
+            
+            % convert sampling interval into sampling frequency
+            % si is the sampling interval in us
+            % samplingFrequency is in Hz
+            samplingFrequency = 1000000/si;
+            
+            % d is organized like this:
+            % 1st column: data points (time series)
+            % 2nd column: channel
+            % 3rd column: sweep #
+            
+            % convert data points into seconds
+            sweepDurationInSeconds = h.sweepLengthInPts/samplingFrequency;
+            xAxis = linspace(0,sweepDurationInSeconds,h.sweepLengthInPts)';
+            
+            % collect some simple info from header
+            nSweeps = size(d,3);
+            nChannels = size(h.recChNames,1);
+            
+            % find light stim info
+            % rationale: I trigger the LED with a 5V digital pulse that is also
+            % recorded by one of my analog inputs. I am looking for a big change in the
+            % derivative of this channel.
+            % ASSUMPTIONs: light stim is the same in all sweeps
+            lightPulseStartInDataPts = find(diff(d(:,lightCh,1))>1);
+            lightPulseStartInSecs = lightPulseStartInDataPts/samplingFrequency;
+            lightPulseEndInDataPts = find(diff(d(:,lightCh,1))<-1);
+            lightPulseEndInSecs = lightPulseEndInDataPts/samplingFrequency;
+            lightPulseDurInSecs = lightPulseEndInSecs - lightPulseStartInSecs;
+
+            if ~isempty(lightPulseStartInSecs)
+                xMinInSec = lightPulseStartInSecs - lightPulseDurInSecs;
+                xMaxInSec = lightPulseStartInSecs + 2*lightPulseDurInSecs;
+            end
+            
+            % create matrix that will be filled
+            yForMean=zeros(h.sweepLengthInPts,nSweeps);          
+
+            % plot all the channels and sweeps
+            figure('name',strcat(prefix,'_all'))
+                for channel=1:nChannels
+                    subplot(nChannels,1,channel)
+                    for sweep=1:nSweeps
+                        yFiltered = smooth(d(:,channel,sweep),smoothSpan);
+                        yForMean(:,sweep) = yFiltered;
+                        plot(xAxis,yFiltered,'Color',[0, 0, 0, 0.25]);
+                        hold on;
+                    end
+                    % calculate mean
+                    yMean = sum(yForMean,2)/nSweeps;
+                    plot(xAxis,yMean,'Color',[0, 0, 0, 1]);
+                    hold off;
+                    ylabel(strcat(cell2mat(h.recChNames(channel)), " (", (cell2mat(h.recChUnits(channel))), ")"),'Interpreter','none');
+                    axis([-inf inf -inf inf])
+                    if channel == mainDataCh
+                        title(prefix,'Interpreter','none');
+                    end
+                end
+                xlabel('Time (s)');
+
+
+            %% Find action potentials (APs) if data was collected in whole cell, current clamp mode
+            if recordingType == "WC_CC"
+                
+                % adjust variables according to user input
+                yScaleBar = yScaleBarWC_CC;
+                yMin = yMinWC_CC;
+                yMax = yMaxWC_CC;
+                minPeakHeight = minPeakHeight_WC_CC;
+                yRange = yMax-yMin; 
+                xRange = xMaxInSec-xMinInSec;
+
+                % adjust exceptions according to the database
+                if ~isnan(database.yMin(row))
+                    yMin = database.yMin(row);
+                end
+                if ~isnan(database.yMax(row))
+                    yMax = database.yMax(row);
+                end
+                if ~isnan(database.minPeakHeight(row))
+                    minPeakHeight = database.minPeakHeight(row);
+                end
+                yRange = yMax-yMin;
+
+                % create arrays that will be filled
+                tsBySweep = {};
+                sweepNumberArrayBySweep = {};
+                hzPreLightBySweep = [];
+                hzDuringLightBySweep = [];
+                hzPostLightBySweep = [];  
+                allTimeStamps = [];
+            
+                % iterate through sweeps
+                for sweep=1:nSweeps
+                    yFiltered = smooth(d(:,mainDataCh,sweep),smoothSpan);
+                    [pks,locs,w,p] = findpeaks(yFiltered,xAxis,'MinPeakHeight',minPeakHeight,'MinPeakDistance',minPeakDistance);
+                    sweepNumberArray = sweep.* ones(length(locs),1);           
+                    % collect sweep-by-sweep data
+                    tsBySweep = [tsBySweep, locs];
+                    sweepNumberArrayBySweep = [sweepNumberArrayBySweep, sweepNumberArray];
+                    % count APs before, during and after opto-stim
+                    locsPreLight = locs(locs>=lightPulseStartInSecs-lightPulseDurInSecs & locs<lightPulseStartInSecs);
+                    locsDuringLight = locs(locs>=lightPulseStartInSecs & locs<lightPulseStartInSecs+lightPulseDurInSecs);
+                    locsPostLight = locs(locs>=lightPulseStartInSecs+lightPulseDurInSecs & locs<lightPulseStartInSecs+2*lightPulseDurInSecs);              
+                    % calculate firing rate before, during and after opto-stim
+                    hzPreLightBySweep(sweep) = length(locsPreLight)/lightPulseDurInSecs;
+                    hzDuringLightBySweep(sweep) = length(locsDuringLight)/lightPulseDurInSecs;
+                    hzPostLightBySweep(sweep) = length(locsPostLight)/lightPulseDurInSecs;  
+                    % save first and last sweep (for quality control later)
+                    if sweep == 1
+                        yFilteredFirstSweep = yFiltered;
+                        pksFirst = pks;
+                        locsFirst = locs;
+                    elseif sweep == nSweeps
+                        yFilteredLastSweep = yFiltered;
+                        pksLast = pks;
+                        locsLast = locs;
+                    end  
+                    allTimeStamps = [allTimeStamps; locs];
+                end   
+
+                % calculate mean and sd of firing rate
+                hzPreLightMean = mean(hzPreLightBySweep);
+                hzPreLightStd = std(hzPreLightBySweep);
+                hzDuringLightMean = mean(hzDuringLightBySweep);
+                hzDuringLightStd = std(hzDuringLightBySweep);
+                hzPostLightMean = mean(hzPostLightBySweep);
+                hzPostLightStd = std(hzPostLightBySweep);
+
+                % determine light effect
+                if hzDuringLightMean < hzPreLightMean - 2*hzPreLightStd
+                    lightEffect = -1;
+                elseif hzDuringLightMean > hzPreLightMean + 2*hzPreLightStd
+                    lightEffect = +1;
+                else 
+                    lightEffect = 0;
+                end
+
+                % organize data for histogram (counting APs accross all
+                % sweeps)
+                edges = [xMinInSec:xMaxInSec];
+                [N, edges] = histcounts(allTimeStamps,edges);
+                firingHz = N/nSweeps;
+
+                % quality control of filter
+                figure('name',strcat(prefix,'_filter_qc'))
+                    subplot(2,1,1)
+                        plot(xAxis,yFilteredFirstSweep,'b')
+                        hold on;
+                        plot(xAxis,d(:,mainDataCh,1),'r')
+                        hold off;
+                        axis([xMinInSec xMaxInSec -inf inf])
+                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                        xlabel('Time (s)');
+                        title(prefix,'Interpreter','none');
+                    subplot(2,1,2)
+                        plot(xAxis,yFilteredLastSweep,'b')
+                        hold on;
+                        plot(xAxis,d(:,mainDataCh,nSweeps),'r')
+                        hold off;
+                        axis([xMinInSec xMaxInSec -inf inf])
+                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                        xlabel('Time (s)');
+            
+                % quality control of found APs
+                figure('name', strcat(prefix, '_AP_qc'))
+                    subplot(2,1,1)
+                        plot(xAxis,yFilteredFirstSweep)
+                        hold on;
+                        plot(locsFirst,pksFirst,'o')
+                        yline(minPeakHeight)
+                        hold off;
+                        axis([xMinInSec xMaxInSec yMin yMax])
+                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                        xlabel('Time (s)');
+                        title(prefix,'Interpreter','none');
+                    subplot(2,1,2)
+                        plot(xAxis,yFilteredLastSweep)
+                        hold on;
+                        plot(locsLast,pksLast,'o')
+                        yline(minPeakHeight)
+                        hold off;
+                        axis([xMinInSec xMaxInSec yMin yMax])
+                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                        xlabel('Time (s)');
+                
+                % niceplot
+                figure('name', strcat(prefix, '_AP_raster'));         
+                    subplot(3,1,1)
+                        % plot example trace
+                        plot(xAxis,smooth(d(:,mainDataCh,1),smoothSpan),'k','LineWidth',0.5)
+                        if ~isempty(lightPulseStartInSecs)
+                            rectangle('Position', [lightPulseStartInSecs yMin lightPulseDurInSecs yMax-yMin], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');
+                        end
+                        axis([xMinInSec xMaxInSec yMin yMax])
+                        set(gca,'Visible','off');
+                        % scale bars
+                        line([xMaxInSec-xScaleBar/1000 xMaxInSec],[yMin yMin],'Color','k')
+                        line([xMaxInSec xMaxInSec],[yMin yMin+yScaleBar],'Color','k')
+                        text(xMaxInSec-xRange/10, yMin+yRange*7/100, strcat(num2str(xScaleBar), " ms"));
+                        text(xMaxInSec-xRange/10, yMin+yRange*14/100, strcat(num2str(yScaleBar), " ", cell2mat(h.recChUnits(mainDataCh))));
+                        % -60 mV line
+                        yline(-60,'Color',[0, 0, 0, 0.5],'LineWidth',0.1)
+                        text(xMinInSec, yMin+yRange*7/100, "line @ -60 mV")
+                        title(prefix,'Interpreter','none');
+                    subplot(3,1,2)
+                        % plot AP raster for all sweeps
+                        for sweep = 1:nSweeps
+                            plot(cell2mat(tsBySweep(sweep)), cell2mat(sweepNumberArrayBySweep(sweep)), '|', 'Color', 'k')
+                            hold on;
+                        end    
+                        % adding light stim
+                        if ~isempty(lightPulseStartInSecs)
+                            rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs nSweeps+1], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');    
+                        end
+                        % adding finishing touches to plot
+                        hold off;
+                        axis([xMinInSec xMaxInSec 0 nSweeps+1])
+                        ylabel(strcat('Sweeps (', num2str(nSweeps), ')'));
+                        yticks([]);
+                        xticks([]);
+                        set(gca, 'YDir','reverse');
+                        xlabel('Time (s)');
+                    subplot(3,1,3)
+                        % plot histogram and 2*SD criteria
+                        hold on;                    
+                        histogram('BinEdges', xMinInSec:xMaxInSec, 'BinCounts', firingHz, 'DisplayStyle', 'stairs', 'EdgeColor', 'k'); 
+                        % plot light stim as rectangle
+                        rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs ymaxhist], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');                       
+                        % plot Hz mean as horizontal line
+                        yline(hzPreLightMean, '--');
+                        % plot +- 2 SD as rectangle around mean
+                        % [x y width height]
+                        rectangle('Position', [0 hzPreLightMean-(2*hzPreLightStd) xMaxInSec 4*hzPreLightStd], 'FaceAlpha', 0.1, 'FaceColor', [0 0 0], 'EdgeColor', 'none');
+                        xlabel('Time (s)');
+                        ylabel('Firing rate (Hz)');
+                        axis([xMinInSec xMaxInSec 0 ymaxhist])
+                        yticks([0 ymaxhist]);
+                        hold off;                        
+            end
+
+
+            %% Find APs if data was collected in loose seal, voltage clamp mode
+            if recordingType == "LS_VC"
+      
+                % adjust variables according to user input
+                yScaleBar = yScaleBarLS_VC;
+                yMin = yMinLS_VC;
+                yMax = yMaxLS_VC;
+                minPeakHeight = minPeakHeight_LS_VC;
+                yRange = yMax-yMin; 
+                xRange = xMaxInSec-xMinInSec;
+
+                % adjust exceptions according to the database
+                if ~isnan(database.yMin(row))
+                    yMin = database.yMin(row);
+                end
+                if ~isnan(database.yMax(row))
+                    yMax = database.yMax(row);
+                end
+                if ~isnan(database.minPeakHeight(row))
+                    minPeakHeight = database.minPeakHeight(row);
+                end
+                yRange = yMax-yMin;
+                
+                % create arrays that will be filled
+                tsBySweep = {};
+                sweepNumberArrayBySweep = {};
+                hzPreLightBySweep = [];
+                hzDuringLightBySweep = [];
+                hzPostLightBySweep = [];  
+                allTimeStamps = [];
+            
+                % iterate through sweeps
+                for sweep=1:nSweeps
+                    yFiltered = bandpass(d(:,mainDataCh,sweep),[highpassThreshold lowpassThreshold],samplingFrequency);
+                    [pks,locs,w,p] = findpeaks(-yFiltered,xAxis,'MinPeakHeight',minPeakHeight,'MinPeakDistance',minPeakDistance);
+                    sweepNumberArray = sweep.* ones(length(locs),1);           
+                    % collect sweep-by-sweep data
+                    tsBySweep = [tsBySweep, locs];
+                    sweepNumberArrayBySweep = [sweepNumberArrayBySweep, sweepNumberArray];
+                    % count APs before, during and after opto-stim
+                    locsPreLight = locs(locs>=lightPulseStartInSecs-lightPulseDurInSecs & locs<lightPulseStartInSecs);
+                    locsDuringLight = locs(locs>=lightPulseStartInSecs & locs<lightPulseStartInSecs+lightPulseDurInSecs);
+                    locsPostLight = locs(locs>=lightPulseStartInSecs+lightPulseDurInSecs & locs<lightPulseStartInSecs+2*lightPulseDurInSecs);              
+                    % calculate firing rate before, during and after opto-stim
+                    hzPreLightBySweep(sweep) = length(locsPreLight)/lightPulseDurInSecs;
+                    hzDuringLightBySweep(sweep) = length(locsDuringLight)/lightPulseDurInSecs;
+                    hzPostLightBySweep(sweep) = length(locsPostLight)/lightPulseDurInSecs;  
+                    % save first and last sweep (for quality control later)
+                    if sweep == 1
+                        yFilteredFirstSweep = yFiltered;
+                        pksFirst = pks;
+                        locsFirst = locs;
+                    elseif sweep == nSweeps
+                        yFilteredLastSweep = yFiltered;
+                        pksLast = pks;
+                        locsLast = locs;
+                    end  
+                    allTimeStamps = [allTimeStamps; locs];
+                end   
+
+                % calculate mean and sd of firing rate
+                hzPreLightMean = mean(hzPreLightBySweep);
+                hzPreLightStd = std(hzPreLightBySweep);
+                hzDuringLightMean = mean(hzDuringLightBySweep);
+                hzDuringLightStd = std(hzDuringLightBySweep);
+                hzPostLightMean = mean(hzPostLightBySweep);
+                hzPostLightStd = std(hzPostLightBySweep);
+
+                % determine light effect
+                if hzDuringLightMean < hzPreLightMean - 2*hzPreLightStd
+                    lightEffect = -1;
+                elseif hzDuringLightMean > hzPreLightMean + 2*hzPreLightStd
+                    lightEffect = +1;
+                else 
+                    lightEffect = 0;
+                end
+
+                % organize data for histogram (counting APs accross all
+                % sweeps)
+                edges = [xMinInSec:xMaxInSec];
+                [N, edges] = histcounts(allTimeStamps,edges);
+                firingHz = N/nSweeps;
+                
+                % quality control of bandpass filter
+                figure('name',strcat(prefix,'_filter_qc'))
+                    subplot(2,1,1)
+                        plot(xAxis,yFilteredFirstSweep,'b')
+                        hold on;
+                        plot(xAxis,d(:,mainDataCh,1),'r')
+                        hold off;
+                        axis([xMinInSec xMaxInSec -inf inf])
+                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                        xlabel('Time (s)');
+                        title(prefix,'Interpreter','none');
+                    subplot(2,1,2)
+                        plot(xAxis,yFilteredLastSweep,'b')
+                        hold on;
+                        plot(xAxis,d(:,mainDataCh,nSweeps),'r')
+                        hold off;
+                        axis([xMinInSec xMaxInSec -inf inf])
+                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                        xlabel('Time (s)');
+            
+                % quality control of found APs
+                figure('name', strcat(prefix, '_AP_qc'))
+                    subplot(2,1,1)
+                        plot(xAxis,yFilteredFirstSweep)
+                        hold on;
+                        plot(locsFirst,-pksFirst,'o')
+                        yline(-minPeakHeight)
+                        hold off;
+                        axis([xMinInSec xMaxInSec yMin yMax])
+                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                        xlabel('Time (s)');
+                        title(prefix,'Interpreter','none');
+                    subplot(2,1,2)
+                        plot(xAxis,yFilteredLastSweep)
+                        hold on;
+                        plot(locsLast,-pksLast,'o')
+                        yline(-minPeakHeight)
+                        hold off;
+                        axis([xMinInSec xMaxInSec yMin yMax])
+                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                        xlabel('Time (s)');
+                
+                % niceplot
+                figure('name', strcat(prefix, '_AP_raster'));
+                    subplot(3,1,1)
+                        % plot example trace
+                        plot(xAxis,bandpass(d(:,mainDataCh,1),[highpassThreshold lowpassThreshold],samplingFrequency),'k','LineWidth',0.5)
+                        title(prefix,'Interpreter','none');
+                        if ~isempty(lightPulseStartInSecs)
+                            rectangle('Position', [lightPulseStartInSecs yMin lightPulseDurInSecs yRange], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');
+                        end
+                        axis([xMinInSec xMaxInSec yMin yMax])
+                        set(gca,'Visible','off');
+                        % scale bars
+                        line([xMaxInSec-xScaleBar/1000 xMaxInSec],[yMin yMin],'Color','k')
+                        line([xMaxInSec xMaxInSec],[yMin yMin+yScaleBar],'Color','k')
+                        text(xMaxInSec-xRange/10, yMin+yRange*7/100, strcat(num2str(xScaleBar), " ms"));
+                        text(xMaxInSec-xRange/10, yMin+yRange*14/100, strcat(num2str(yScaleBar), " ", cell2mat(h.recChUnits(mainDataCh))));      
+                    subplot(3,1,2)
+                        % plot AP raster for all sweeps
+                        for sweep = 1:nSweeps
+                            if size(tsBySweep,1)>=sweep
+                                plot(cell2mat(tsBySweep(sweep)), cell2mat(sweepNumberArrayBySweep(sweep)), '|', 'Color', 'k')
+                                hold on;
+                            end
+                        end    
+                        % adding light stim
+                        if ~isempty(lightPulseStartInSecs)
+                            rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs nSweeps+1], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');    
+                        end
+                        % adding finishing touches to plot
+                        hold off;
+                        axis([xMinInSec xMaxInSec 0 nSweeps+1])
+                        ylabel(strcat('Sweeps (', num2str(nSweeps), ')'));
+                        yticks([]);
+                        xticks([]);
+                        set(gca, 'YDir','reverse');
+                        xlabel('Time (s)');  
+                    subplot(3,1,3)
+                        % plot histogram and 2*SD criteria
+                        hold on;                    
+                        histogram('BinEdges', xMinInSec:xMaxInSec, 'BinCounts', firingHz, 'DisplayStyle', 'stairs', 'EdgeColor', 'k'); 
+                        % plot light stim as rectangle
+                        rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs ymaxhist], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');                       
+                        % plot Hz mean as horizontal line
+                        yline(hzPreLightMean, '--');
+                        % plot +- 2 SD as rectangle around mean
+                        % [x y width height]
+                        rectangle('Position', [0 hzPreLightMean-(2*hzPreLightStd) xMaxInSec 4*hzPreLightStd], 'FaceAlpha', 0.1, 'FaceColor', [0 0 0], 'EdgeColor', 'none');
+                        xlabel('Time (s)');
+                        ylabel('Firing rate (Hz)');
+                        axis([xMinInSec xMaxInSec 0 ymaxhist])
+                        yticks([0 ymaxhist]);
+                        hold off;
+            end
+
+
+            %% Find APs if data was collected in loose seal, current clamp mode
+            if recordingType == "LS_CC"
+
+                % adjust variables according to user input
+                yScaleBar = yScaleBarLS_CC;
+                yMin = yMinLS_CC;
+                yMax = yMaxLS_CC;
+                minPeakHeight = minPeakHeight_LS_CC;
+                yRange = yMax-yMin; 
+                xRange = xMaxInSec-xMinInSec;
+
+                % adjust exceptions according to the database
+                if ~isnan(database.yMin(row))
+                    yMin = database.yMin(row);
+                end
+                if ~isnan(database.yMax(row))
+                    yMax = database.yMax(row);
+                end
+                if ~isnan(database.minPeakHeight(row))
+                    minPeakHeight = database.minPeakHeight(row);
+                end
+                yRange = yMax-yMin;
+
+                % create arrays that will be filled
+                tsBySweep = {};
+                sweepNumberArrayBySweep = {};
+                hzPreLightBySweep = [];
+                hzDuringLightBySweep = [];
+                hzPostLightBySweep = [];  
+                allTimeStamps = [];
+            
+                % iterate through sweeps
+                for sweep=1:nSweeps
+                    yFiltered = bandpass(d(:,mainDataCh,sweep),[highpassThreshold lowpassThreshold],samplingFrequency);
+                    [pks,locs,w,p] = findpeaks(-yFiltered,xAxis,'MinPeakHeight',minPeakHeight,'MinPeakDistance',minPeakDistance);
+                    sweepNumberArray = sweep.* ones(length(locs),1);           
+                    % collect sweep-by-sweep data
+                    tsBySweep = [tsBySweep, locs];
+                    sweepNumberArrayBySweep = [sweepNumberArrayBySweep, sweepNumberArray];
+                    % count APs before, during and after opto-stim
+                    locsPreLight = locs(locs>=lightPulseStartInSecs-lightPulseDurInSecs & locs<lightPulseStartInSecs);
+                    locsDuringLight = locs(locs>=lightPulseStartInSecs & locs<lightPulseStartInSecs+lightPulseDurInSecs);
+                    locsPostLight = locs(locs>=lightPulseStartInSecs+lightPulseDurInSecs & locs<lightPulseStartInSecs+2*lightPulseDurInSecs);              
+                    % calculate firing rate before, during and after opto-stim
+                    hzPreLightBySweep(sweep) = length(locsPreLight)/lightPulseDurInSecs;
+                    hzDuringLightBySweep(sweep) = length(locsDuringLight)/lightPulseDurInSecs;
+                    hzPostLightBySweep(sweep) = length(locsPostLight)/lightPulseDurInSecs;  
+                    % save first and last sweep (for quality control later)
+                    if sweep == 1
+                        yFilteredFirstSweep = yFiltered;
+                        pksFirst = pks;
+                        locsFirst = locs;
+                    elseif sweep == nSweeps
+                        yFilteredLastSweep = yFiltered;
+                        pksLast = pks;
+                        locsLast = locs;
+                    end  
+                    allTimeStamps = [allTimeStamps; locs];
+                end   
+
+                % calculate mean and sd of firing rate
+                hzPreLightMean = mean(hzPreLightBySweep);
+                hzPreLightStd = std(hzPreLightBySweep);
+                hzDuringLightMean = mean(hzDuringLightBySweep);
+                hzDuringLightStd = std(hzDuringLightBySweep);
+                hzPostLightMean = mean(hzPostLightBySweep);
+                hzPostLightStd = std(hzPostLightBySweep);
+
+                % determine light effect
+                if hzDuringLightMean < hzPreLightMean - 2*hzPreLightStd
+                    lightEffect = -1;
+                elseif hzDuringLightMean > hzPreLightMean + 2*hzPreLightStd
+                    lightEffect = +1;
+                else 
+                    lightEffect = 0;
+                end
+
+                % organize data for histogram (counting APs accross all
+                % sweeps)
+                edges = [xMinInSec:xMaxInSec];
+                [N, edges] = histcounts(allTimeStamps,edges);
+                firingHz = N/nSweeps;
+                
+                % quality control of bandpass filter
+                figure('name',strcat(prefix,'_filter_qc'))
+                    subplot(2,1,1)
+                        plot(xAxis,yFilteredFirstSweep,'b')
+                        hold on;
+                        plot(xAxis,d(:,mainDataCh,1),'r')
+                        hold off;
+                        axis([xMinInSec xMaxInSec -inf inf])
+                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                        xlabel('Time (s)');
+                        title(prefix,'Interpreter','none');
+                    subplot(2,1,2)
+                        plot(xAxis,yFilteredLastSweep,'b')
+                        hold on;
+                        plot(xAxis,d(:,mainDataCh,nSweeps),'r')
+                        hold off;
+                        axis([xMinInSec xMaxInSec -inf inf])
+                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                        xlabel('Time (s)');
+            
+                % quality control of found APs
+                figure('name', strcat(prefix, '_AP_qc'))
+                    subplot(2,1,1)
+                        plot(xAxis,yFilteredFirstSweep)
+                        hold on;
+                        plot(locsFirst,-pksFirst,'o')
+                        yline(-minPeakHeight)
+                        hold off;
+                        axis([xMinInSec xMaxInSec yMin yMax])
+                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                        xlabel('Time (s)');
+                        title(prefix,'Interpreter','none');
+                    subplot(2,1,2)
+                        plot(xAxis,yFilteredLastSweep)
+                        hold on;
+                        plot(locsLast,-pksLast,'o')
+                        yline(-minPeakHeight)
+                        hold off;
+                        axis([xMinInSec xMaxInSec yMin yMax])
+                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                        xlabel('Time (s)');
+                
+                % niceplot
+                figure('name', strcat(prefix, '_AP_raster'));
+                    subplot(3,1,1)
+                        % plot example trace
+                        plot(xAxis,bandpass(d(:,mainDataCh,1),[highpassThreshold lowpassThreshold],samplingFrequency),'k','LineWidth',0.5)
+                        if ~isempty(lightPulseStartInSecs)
+                            rectangle('Position', [lightPulseStartInSecs yMin lightPulseDurInSecs yRange], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');
+                        end
+                        axis([xMinInSec xMaxInSec yMin yMax])
+                        set(gca,'Visible','off');
+                        % scale bars
+                        line([xMaxInSec-xScaleBar/1000 xMaxInSec],[yMin yMin],'Color','k')
+                        line([xMaxInSec xMaxInSec],[yMin yMin+yScaleBar],'Color','k')
+                        text(xMaxInSec-xRange/10, yMin+yRange*7/100, strcat(num2str(xScaleBar), " ms"));
+                        text(xMaxInSec-xRange/10, yMin+yRange*14/100, strcat(num2str(yScaleBar), " ", cell2mat(h.recChUnits(mainDataCh))));  
+                        title(prefix,'Interpreter','none');
+                    subplot(3,1,2)
+                        % plot AP raster for all sweeps
+                        for sweep = 1:nSweeps
+                            plot(cell2mat(tsBySweep(sweep)), cell2mat(sweepNumberArrayBySweep(sweep)), '|', 'Color', 'k')
+                            hold on;
+                        end    
+                        % adding light stim
+                        if ~isempty(lightPulseStartInSecs)
+                            rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs nSweeps+1], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');    
+                        end
+                        % adding finishing touches to plot
+                        hold off;
+                        axis([xMinInSec xMaxInSec 0 nSweeps+1])
+                        ylabel(strcat('Sweeps (', num2str(nSweeps), ')'));
+                        yticks([]);
+                        xticks([]);
+                        set(gca, 'YDir','reverse');
+                        xlabel('Time (s)');  
+                    subplot(3,1,3)
+                        % plot histogram and 2*SD criteria
+                        hold on;                    
+                        histogram('BinEdges', xMinInSec:xMaxInSec, 'BinCounts', firingHz, 'DisplayStyle', 'stairs', 'EdgeColor', 'k'); 
+                        % plot light stim as rectangle
+                        rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs ymaxhist], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');                       
+                        % plot Hz mean as horizontal line
+                        yline(hzPreLightMean, '--');
+                        % plot +- 2 SD as rectangle around mean
+                        % [x y width height]
+                        rectangle('Position', [0 hzPreLightMean-(2*hzPreLightStd) 30 4*hzPreLightStd], 'FaceAlpha', 0.1, 'FaceColor', [0 0 0], 'EdgeColor', 'none');
+                        xlabel('Time (s)');
+                        ylabel('Firing rate (Hz)');
+                        axis([xMinInSec xMaxInSec 0 ymaxhist])
+                        yticks([0 ymaxhist]);
+                        hold off;
+            end
+        end
+        saveAllFigs('/Users/priscilla/OHSU Dropbox/Priscilla Ambrosi/Dropbox - Moss Lab/Lab - Data summaries/2024-12-08 iChloc analysis'); close all
     end
-    % calculate mean
-    yMean = sum(yForMean,2)/nSweeps;
-    plot(xAxis,yMean,'Color',[0, 0, 0, 1]);
-    hold off;
-    ylabel(strcat(cell2mat(h.recChNames(channel)), " (", (cell2mat(h.recChUnits(channel))), ")"));
-    axis([xMinInSec xMaxInSec -inf inf])
-end
-xlabel('Time (s)');
-
-% plot the 1st sweep of all the channels to compare filtered vs not
-% filtered data
-figure('name',strcat(fileName,'_filtered vs not'))
-for channel=1:nChannels
-    subplot(nChannels,1,channel)
-    plot(xAxis,d(:,channel,sweep),'Color','b');
-    hold on;
-    yFiltered = smooth(d(:,channel,sweep),smoothSpan);
-    plot(xAxis,yFiltered,'Color','r');
-    hold off;
-    ylabel(strcat(cell2mat(h.recChNames(channel)), " (", (cell2mat(h.recChUnits(channel))), ")"));
-    axis([xMinInSec xMaxInSec -inf inf])
-end
-xlabel('Time (s)');
-
-
-%% FIND APs (if applicable)
-
-% if data was collected in current clamp, find action potentials and plot a raster 
-if strcmp(cell2mat(h.recChUnits(mainDataCh)),'mV')
-
-    % create arrays that will be filled
-    tsBySweep = {};
-    sweepNumberArrayBySweep = {};
-
-    % iterate through sweeps
-    for sweep=1:nSweeps
-        yFiltered = smooth(d(:,mainDataCh,sweep),smoothSpan);
-        [pks,locs,w,p] = findpeaks(yFiltered,xAxis,'MinPeakHeight',minPeakHeight,'MinPeakDistance',minPeakDistance);
-        sweepNumberArray = sweep.* ones(length(locs),1);
-
-        % collect sweep-by-sweep data
-        tsBySweep = [tsBySweep, locs];
-        sweepNumberArrayBySweep = [sweepNumberArrayBySweep, sweepNumberArray];
-    end   
-
-    % quality control of found APs
-    figure('name', strcat(fileName, '_firing_qc'))
-    plot(xAxis,yFiltered)
-    hold on;
-    plot(locs,pks,'o')
-    yline(minPeakHeight)
-    hold off;
-    axis([xMinInSec xMaxInSec -100 40])
-    ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-    xlabel('Time (s)');
-    
-    % niceplot
-    figure('name', strcat(fileName, '_firing_raster'));
-    subplot(2,1,1)
-        % plot example trace
-        plot(xAxis,smooth(d(:,mainDataCh,1),smoothSpan),'k','LineWidth',0.5)
-        % line([lightPulseStartInSecs,lightPulseStartInSecs+lightPulseDurInSecs],[35,35],'Color',[0 0.4470 0.7410],'LineWidth',5)
-        if ~isempty(lightPulseStartInSecs)
-            rectangle('Position', [lightPulseStartInSecs -100 lightPulseDurInSecs 200], 'FaceAlpha', 0.5, 'FaceColor', [0 0.4470 0.7410], 'EdgeColor', 'none');
-        end
-        axis([xMinInSec xMaxInSec -100 40])
-        set(gca,'Visible','off');
-        % scale bars
-        line([xMaxInSec-0.05 xMaxInSec],[-100 -100],'Color','k')
-        line([xMaxInSec xMaxInSec],[-100 -90],'Color','k')
-        text(xMaxInSec-0.2, -90, "50 ms")
-        text(xMaxInSec-0.2, -80, "10 mV")
-        % -60 mV line
-        yline(-60,'Color',[0, 0, 0, 0.5],'LineWidth',0.1)
-        text(xMinInSec, -90, "line @ -60 mV")        
-
-    subplot(2,1,2)
-        % plot AP raster for all sweeps
-        for sweep = 1:nSweeps
-            plot(cell2mat(tsBySweep(sweep)), cell2mat(sweepNumberArrayBySweep(sweep)), '|', 'Color', 'k')
-            hold on;
-        end    
-        % adding light stim
-        if ~isempty(lightPulseStartInSecs)
-            rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs nSweeps+1], 'FaceAlpha', 0.5, 'FaceColor', [0 0.4470 0.7410], 'EdgeColor', 'none');    
-        end
-        % adding finishing touches to plot
-        hold off;
-        axis([xMinInSec xMaxInSec 0 nSweeps+1])
-        ylabel(strcat('Sweeps (', num2str(nSweeps), ')'));
-        yticks([]);
-        xticks([]);
-        set(gca, 'YDir','reverse');
-        xlabel('Time (s)');
-
 end
 
-
-%% Cell Attached Analysis
-
-if cellAttached == 1
-
-    % create arrays that will be filled
-    tsBySweep = {};
-    sweepNumberArrayBySweep = {};
-
-    % iterate through sweeps
-    for sweep=1:nSweeps
-        yFiltered = bandpass(d(:,mainDataCh,sweep),[highpassThreshold lowpassThreshold],samplingFrequency);
-        [pks,locs,w,p] = findpeaks(yFiltered,xAxis,'MinPeakHeight',-minPeakHeight,'MinPeakDistance',minPeakDistance);
-        sweepNumberArray = sweep.* ones(length(locs),1);
-
-        % save first and last sweep (to save time later)
-        if sweep == 1
-            yFilteredFirstSweep = yFiltered;
-            pksFirst = pks;
-            locsFirst = locs;
-        elseif sweep == nSweeps
-            yFilteredLastSweep = yFiltered;
-            pksLast = pks;
-            locsLast = locs;
-        end
-
-        % collect sweep-by-sweep data
-        tsBySweep = [tsBySweep, locs];
-        sweepNumberArrayBySweep = [sweepNumberArrayBySweep, sweepNumberArray];
-    end   
-
-    % quality control of bandpass filter
-    figure('name',strcat(fileName,'_bandpass vs not'))
-    subplot(2,1,1)
-        plot(xAxis,yFilteredFirstSweep,'b')
-        hold on;
-        plot(xAxis,d(:,mainDataCh,1),'r')
-        hold off;
-        axis([xMinInSec xMaxInSec -inf inf])
-        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-        xlabel('Time (s)');
-    subplot(2,1,2)
-        plot(xAxis,yFilteredLastSweep,'b')
-        hold on;
-        plot(xAxis,d(:,mainDataCh,nSweeps),'r')
-        hold off;
-        axis([xMinInSec xMaxInSec -inf inf])
-        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-        xlabel('Time (s)');
-
-    % quality control of found APs
-    figure('name', strcat(fileName, '_cell_attached_qc'))
-    subplot(2,1,1)
-        plot(xAxis,yFilteredFirstSweep)
-        hold on;
-        plot(locsFirst,pksFirst,'o')
-        yline(-minPeakHeight)
-        hold off;
-        axis([xMinInSec xMaxInSec yMin yMax])
-        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-        xlabel('Time (s)');
-    subplot(2,1,2)
-        plot(xAxis,yFilteredLastSweep)
-        hold on;
-        plot(locsLast,pksLast,'o')
-        yline(-minPeakHeight)
-        hold off;
-        axis([xMinInSec xMaxInSec yMin yMax])
-        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-        xlabel('Time (s)');
-    
-    % niceplot
-    figure('name', strcat(fileName, '_cell_attached_raster'));
-    subplot(2,1,1)
-        % plot example trace
-        plot(xAxis,bandpass(d(:,mainDataCh,1),[highpassThreshold lowpassThreshold],samplingFrequency),'k','LineWidth',0.5)
-        % line([lightPulseStartInSecs,lightPulseStartInSecs+lightPulseDurInSecs],[35,35],'Color',[0 0.4470 0.7410],'LineWidth',5)
-        if ~isempty(lightPulseStartInSecs)
-            rectangle('Position', [lightPulseStartInSecs -100 lightPulseDurInSecs 200], 'FaceAlpha', 0.5, 'FaceColor', [0 0.4470 0.7410], 'EdgeColor', 'none');
-        end
-        axis([xMinInSec xMaxInSec yMin yMax])
-        set(gca,'Visible','off');
-        % scale bars
-        line([xMaxInSec-0.05 xMaxInSec],[-100 -100],'Color','k')
-        line([xMaxInSec xMaxInSec],[-100 -90],'Color','k')
-        text(xMaxInSec-0.2, -90, "50 ms")
-        text(xMaxInSec-0.2, -80, "10 mV")       
-
-    subplot(2,1,2)
-        % plot AP raster for all sweeps
-        for sweep = 1:nSweeps
-            plot(cell2mat(tsBySweep(sweep)), cell2mat(sweepNumberArrayBySweep(sweep)), '|', 'Color', 'k')
-            hold on;
-        end    
-        % adding light stim
-        if ~isempty(lightPulseStartInSecs)
-            rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs nSweeps+1], 'FaceAlpha', 0.5, 'FaceColor', [0 0.4470 0.7410], 'EdgeColor', 'none');    
-        end
-        % adding finishing touches to plot
-        hold off;
-        axis([xMinInSec xMaxInSec 0 nSweeps+1])
-        ylabel(strcat('Sweeps (', num2str(nSweeps), ')'));
-        yticks([]);
-        xticks([]);
-        set(gca, 'YDir','reverse');
-        xlabel('Time (s)');
-
-end
