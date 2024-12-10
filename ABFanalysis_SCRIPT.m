@@ -1,20 +1,27 @@
 %{
-
 to do
     write code to analyze current steps
     double check ymin and ymax values within plots
     create spreadsheets w data
-    extend xMaxInSec to 5s to get recovery of firing after o-stim
-    fix firing histogram
+    plot SEM instead of 2+-SD
 
+pre-reqs
+    abfload
+    saveAllFigs
+    curve fitting toolbox (smooth)
+    signal processing toolbox (bandpass)
 %}
 
 
 %% USER INPUT
 
-databaseFile = '/Users/priscilla/OHSU Dropbox/Priscilla Ambrosi/Dropbox - Moss Lab/Lab - Data/Ephys Database.xlsx';
-firstRow = 13;
-analyzeOnlyOneRow = 1;
+databaseFile = 'C:\Users\ambrosi\OHSU Dropbox\Priscilla Ambrosi\Dropbox - Moss Lab\Lab - Data\Ephys\Ephys Database_PC.xlsx';
+saveDir = 'C:\Users\ambrosi\OHSU Dropbox\Priscilla Ambrosi\Dropbox - Moss Lab\Lab - Data summaries\2024-12-10 spag';
+firstRow = 1;               % remember to account for header when counting rows!
+analyzeOnlyOneRow = 0;      % 1 (yes) or 0 (no)
+plotFigs = 0;               % 1 (yes) or 0 (no)
+saveFigs = 0;               % 1 (yes) or 0 (no)
+saveData = 1;               % 1 (yes) or 0 (no)
 
 % affects data analysis
 mainDataCh = 1;             % channel with recording from cell
@@ -24,8 +31,8 @@ greenLightCh = 4;           % channel with green opto stim
 
 % affects data viz
 xMinInSec = 0;
-xMaxInSec = 2.5;
-xScaleBar = 100;
+xMaxInSec = 3.5;
+xScaleBar = 500;
 yMinWC_VC = -500;
 yMaxWC_VC = 500;
 yScaleBarWC_VC = 100;
@@ -46,8 +53,12 @@ highpassThreshold = 100;
 lowpassThreshold = 1500; 
 minPeakDistance = 0.001;    % in seconds
 minPeakHeight_WC_CC = -20;
-minPeakHeight_LS_VC = 100;  % make code look for valleys instead of peaks
-minPeakHeight_LS_CC = 0.5;  % make code look for valleys instead of peaks
+minPeakHeight_LS_VC = 100;  % FYI code looks for valleys instead of peaks
+minPeakHeight_LS_CC = 0.5;  % FYI code looks for valleys instead of peaks
+
+% affects analysis of data without o-stim
+usualLightPulseDurInSec = 0.5;
+usualLightPulseStartInSecs = 0.6126;
 
 
 %% GATHER DATA FROM DATABASE
@@ -55,13 +66,13 @@ minPeakHeight_LS_CC = 0.5;  % make code look for valleys instead of peaks
 % save importing options so we can change them
 opts = detectImportOptions(databaseFile);
 
-% change the variable type in column 11 (file_num) to char so that matlab
+% change the variable type in column 4 (file_num) to char so that matlab
 % will actially read all the values in each cell. Why? Each cell is column
-% 11 can contain multiple numbers, separated by a comma. If you let matlab
-% do its auto variable type detection, it will interpret column 11 cells as
+% 4 can contain multiple numbers, separated by a comma. If you let matlab
+% do its auto variable type detection, it will interpret column 4 cells as
 % doubles and will import cells with multiple numbers as "NaN".
 % ALERT: change the column number if you add/remove database columns
-opts.VariableTypes(11) = {'char'};
+opts.VariableTypes(4) = {'char'};
 
 % read database file using custom options
 database = readtable(databaseFile, opts);
@@ -75,8 +86,38 @@ if analyzeOnlyOneRow == 1
     rows = firstRow;
 end
 
+% get path of database file to figure out path of raw data files
+[filepath,name,ext]=fileparts(databaseFile);
+
+
+%% CREATE MATRICES that may or may not be filled later
+
+mouseNameByFile = [];
+mouseSexByFile = [];
+cellNameByFile = [];
+opsinExpressionByFile = [];
+LEDcolorByFile = [];
+LEDpowerByFile = [];
+recordingTypeByFile = [];
+abfFileNameByFile = [];
+sweepDurationInSecondsByFile = [];
+lightPulseDurInSecsByFile = [];
+hzPreLightMeanByFile = []; 
+hzPreLightStdByFile = [];                 
+hzDuringLightMeanByFile = [];               
+hzDuringLightStdByFile = [];
+hzPostLightMeanByFile = [];
+hzPostLightStdByFile = [];
+hz10sPostLightMeanByFile = [];
+hz10sPostLightStdByFile = [];
+lightEffectByFile = [];
+recovery10sAfterLightByFile = [];
+
 
 %% PROCESS DATA FROM DATABASE
+
+% get analysis date
+analysisDate =  datestr(datetime('today'),'yyyy-mm-dd');
 
 % iterate through every row
 for row=firstRow:rows
@@ -114,7 +155,8 @@ for row=firstRow:rows
         recordingType = cell2mat(database.rec_type(row));
 
         % collect basename of files in directory
-        abfFilesDir = cell2mat(database.dir(row));
+        % abfFilesDir = cell2mat(database.dir(row));
+        abfFilesDir = fullfile(filepath,num2str(dateRecorded));
         abfFiles = dir(fullfile(abfFilesDir, '*.abf'));
         abfFilesPrefix = abfFiles(1).name(1:end-8);
 
@@ -169,33 +211,42 @@ for row=firstRow:rows
 
             if ~isempty(lightPulseStartInSecs)
                 xMinInSec = lightPulseStartInSecs - lightPulseDurInSecs;
-                xMaxInSec = lightPulseStartInSecs + 6*lightPulseDurInSecs;
+                xMaxInSec = lightPulseStartInSecs + 10*lightPulseDurInSecs;
+            end
+
+            if isempty(lightPulseDurInSecs)
+                lightPulseDurInSecs = usualLightPulseDurInSec;
+                lightPulseStartInSecs = usualLightPulseStartInSecs;
+                xMinInSec = lightPulseStartInSecs - lightPulseDurInSecs;
+                xMaxInSec = lightPulseStartInSecs + 10*lightPulseDurInSecs;
             end
             
             % create matrix that will be filled
             yForMean=zeros(h.sweepLengthInPts,nSweeps);          
 
-            % plot all the channels and sweeps
-            figure('name',strcat(prefix,'_all'))
-                for channel=1:nChannels
-                    subplot(nChannels,1,channel)
-                    for sweep=1:nSweeps
-                        yFiltered = smooth(d(:,channel,sweep),smoothSpan);
-                        yForMean(:,sweep) = yFiltered;
-                        plot(xAxis,yFiltered,'Color',[0, 0, 0, 0.25]);
-                        hold on;
+            if plotFigs == 1
+                % plot all the channels and sweeps
+                figure('name',strcat(prefix,'_all'))
+                    for channel=1:nChannels
+                        subplot(nChannels,1,channel)
+                        for sweep=1:nSweeps
+                            yFiltered = smooth(d(:,channel,sweep),smoothSpan);
+                            yForMean(:,sweep) = yFiltered;
+                            plot(xAxis,yFiltered,'Color',[0, 0, 0, 0.25]);
+                            hold on;
+                        end
+                        % calculate mean
+                        yMean = sum(yForMean,2)/nSweeps;
+                        plot(xAxis,yMean,'Color',[0, 0, 0, 1]);
+                        hold off;
+                        ylabel(strcat(cell2mat(h.recChNames(channel)), " (", (cell2mat(h.recChUnits(channel))), ")"),'Interpreter','none');
+                        axis([-inf inf -inf inf])
+                        if channel == mainDataCh
+                            title(prefix,'Interpreter','none');
+                        end
                     end
-                    % calculate mean
-                    yMean = sum(yForMean,2)/nSweeps;
-                    plot(xAxis,yMean,'Color',[0, 0, 0, 1]);
-                    hold off;
-                    ylabel(strcat(cell2mat(h.recChNames(channel)), " (", (cell2mat(h.recChUnits(channel))), ")"),'Interpreter','none');
-                    axis([-inf inf -inf inf])
-                    if channel == mainDataCh
-                        title(prefix,'Interpreter','none');
-                    end
-                end
-                xlabel('Time (s)');
+                    xlabel('Time (s)');
+            end
 
 
             %% Find action potentials (APs) if data was collected in whole cell, current clamp mode
@@ -240,11 +291,13 @@ for row=firstRow:rows
                     % count APs before, during and after opto-stim
                     locsPreLight = locs(locs>=lightPulseStartInSecs-lightPulseDurInSecs & locs<lightPulseStartInSecs);
                     locsDuringLight = locs(locs>=lightPulseStartInSecs & locs<lightPulseStartInSecs+lightPulseDurInSecs);
-                    locsPostLight = locs(locs>=lightPulseStartInSecs+lightPulseDurInSecs & locs<lightPulseStartInSecs+2*lightPulseDurInSecs);              
+                    locsPostLight = locs(locs>=lightPulseStartInSecs+lightPulseDurInSecs & locs<lightPulseStartInSecs+2*lightPulseDurInSecs);   
+                    locs10sPostLight = locs(locs>=lightPulseStartInSecs+10 & locs<lightPulseStartInSecs+10+lightPulseDurInSecs);
                     % calculate firing rate before, during and after opto-stim
                     hzPreLightBySweep(sweep) = length(locsPreLight)/lightPulseDurInSecs;
                     hzDuringLightBySweep(sweep) = length(locsDuringLight)/lightPulseDurInSecs;
                     hzPostLightBySweep(sweep) = length(locsPostLight)/lightPulseDurInSecs;  
+                    hz10sPostLightBySweep(sweep) = length(locs10sPostLight)/lightPulseDurInSecs; 
                     % save first and last sweep (for quality control later)
                     if sweep == 1
                         yFilteredFirstSweep = yFiltered;
@@ -265,6 +318,8 @@ for row=firstRow:rows
                 hzDuringLightStd = std(hzDuringLightBySweep);
                 hzPostLightMean = mean(hzPostLightBySweep);
                 hzPostLightStd = std(hzPostLightBySweep);
+                hz10sPostLightMean = mean(hz10sPostLightBySweep);
+                hz10sPostLightStd = std(hz10sPostLightBySweep);
 
                 % determine light effect
                 if hzDuringLightMean < hzPreLightMean - 2*hzPreLightStd
@@ -275,107 +330,116 @@ for row=firstRow:rows
                     lightEffect = 0;
                 end
 
+                % determine recovery 10s after light
+                if hz10sPostLightStd >= hzPreLightMean - 2*hzPreLightStd && hz10sPostLightStd <= hzPreLightMean + 2*hzPreLightStd
+                    recovery10sAfterLight = 1;
+                else 
+                    recovery10sAfterLight = 0;
+                end
+
                 % organize data for histogram (counting APs accross all
                 % sweeps)
-                edges = [xMinInSec:xMaxInSec];
+                edges = xMinInSec:lightPulseDurInSecs:xMaxInSec;
                 [N, edges] = histcounts(allTimeStamps,edges);
-                firingHz = N/nSweeps;
+                firingHz = (1/lightPulseDurInSecs)*N/nSweeps;
 
-                % quality control of filter
-                figure('name',strcat(prefix,'_filter_qc'))
-                    subplot(2,1,1)
-                        plot(xAxis,yFilteredFirstSweep,'b')
-                        hold on;
-                        plot(xAxis,d(:,mainDataCh,1),'r')
-                        hold off;
-                        axis([xMinInSec xMaxInSec -inf inf])
-                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-                        xlabel('Time (s)');
-                        title(prefix,'Interpreter','none');
-                    subplot(2,1,2)
-                        plot(xAxis,yFilteredLastSweep,'b')
-                        hold on;
-                        plot(xAxis,d(:,mainDataCh,nSweeps),'r')
-                        hold off;
-                        axis([xMinInSec xMaxInSec -inf inf])
-                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-                        xlabel('Time (s)');
-            
-                % quality control of found APs
-                figure('name', strcat(prefix, '_AP_qc'))
-                    subplot(2,1,1)
-                        plot(xAxis,yFilteredFirstSweep)
-                        hold on;
-                        plot(locsFirst,pksFirst,'o')
-                        yline(minPeakHeight)
-                        hold off;
-                        axis([xMinInSec xMaxInSec yMin yMax])
-                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-                        xlabel('Time (s)');
-                        title(prefix,'Interpreter','none');
-                    subplot(2,1,2)
-                        plot(xAxis,yFilteredLastSweep)
-                        hold on;
-                        plot(locsLast,pksLast,'o')
-                        yline(minPeakHeight)
-                        hold off;
-                        axis([xMinInSec xMaxInSec yMin yMax])
-                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-                        xlabel('Time (s)');
-                
-                % niceplot
-                figure('name', strcat(prefix, '_AP_raster'));         
-                    subplot(3,1,1)
-                        % plot example trace
-                        plot(xAxis,smooth(d(:,mainDataCh,1),smoothSpan),'k','LineWidth',0.5)
-                        if ~isempty(lightPulseStartInSecs)
-                            rectangle('Position', [lightPulseStartInSecs yMin lightPulseDurInSecs yMax-yMin], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');
-                        end
-                        axis([xMinInSec xMaxInSec yMin yMax])
-                        set(gca,'Visible','off');
-                        % scale bars
-                        line([xMaxInSec-xScaleBar/1000 xMaxInSec],[yMin yMin],'Color','k')
-                        line([xMaxInSec xMaxInSec],[yMin yMin+yScaleBar],'Color','k')
-                        text(xMaxInSec-xRange/10, yMin+yRange*7/100, strcat(num2str(xScaleBar), " ms"));
-                        text(xMaxInSec-xRange/10, yMin+yRange*14/100, strcat(num2str(yScaleBar), " ", cell2mat(h.recChUnits(mainDataCh))));
-                        % -60 mV line
-                        yline(-60,'Color',[0, 0, 0, 0.5],'LineWidth',0.1)
-                        text(xMinInSec, yMin+yRange*7/100, "line @ -60 mV")
-                        title(prefix,'Interpreter','none');
-                    subplot(3,1,2)
-                        % plot AP raster for all sweeps
-                        for sweep = 1:nSweeps
-                            plot(cell2mat(tsBySweep(sweep)), cell2mat(sweepNumberArrayBySweep(sweep)), '|', 'Color', 'k')
+                if plotFigs == 1
+                    % quality control of filter
+                    figure('name',strcat(prefix,'_filter_qc'))
+                        subplot(2,1,1)
+                            plot(xAxis,yFilteredFirstSweep,'b')
                             hold on;
-                        end    
-                        % adding light stim
-                        if ~isempty(lightPulseStartInSecs)
-                            rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs nSweeps+1], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');    
-                        end
-                        % adding finishing touches to plot
-                        hold off;
-                        axis([xMinInSec xMaxInSec 0 nSweeps+1])
-                        ylabel(strcat('Sweeps (', num2str(nSweeps), ')'));
-                        yticks([]);
-                        xticks([]);
-                        set(gca, 'YDir','reverse');
-                        xlabel('Time (s)');
-                    subplot(3,1,3)
-                        % plot histogram and 2*SD criteria
-                        hold on;                    
-                        histogram('BinEdges', xMinInSec:xMaxInSec, 'BinCounts', firingHz, 'DisplayStyle', 'stairs', 'EdgeColor', 'k'); 
-                        % plot light stim as rectangle
-                        rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs ymaxhist], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');                       
-                        % plot Hz mean as horizontal line
-                        yline(hzPreLightMean, '--');
-                        % plot +- 2 SD as rectangle around mean
-                        % [x y width height]
-                        rectangle('Position', [0 hzPreLightMean-(2*hzPreLightStd) xMaxInSec 4*hzPreLightStd], 'FaceAlpha', 0.1, 'FaceColor', [0 0 0], 'EdgeColor', 'none');
-                        xlabel('Time (s)');
-                        ylabel('Firing rate (Hz)');
-                        axis([xMinInSec xMaxInSec 0 ymaxhist])
-                        yticks([0 ymaxhist]);
-                        hold off;                        
+                            plot(xAxis,d(:,mainDataCh,1),'r')
+                            hold off;
+                            axis([xMinInSec xMaxInSec -inf inf])
+                            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                            xlabel('Time (s)');
+                            title(prefix,'Interpreter','none');
+                        subplot(2,1,2)
+                            plot(xAxis,yFilteredLastSweep,'b')
+                            hold on;
+                            plot(xAxis,d(:,mainDataCh,nSweeps),'r')
+                            hold off;
+                            axis([xMinInSec xMaxInSec -inf inf])
+                            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                            xlabel('Time (s)');
+                
+                    % quality control of found APs
+                    figure('name', strcat(prefix, '_AP_qc'))
+                        subplot(2,1,1)
+                            plot(xAxis,yFilteredFirstSweep)
+                            hold on;
+                            plot(locsFirst,pksFirst,'o')
+                            yline(minPeakHeight)
+                            hold off;
+                            axis([xMinInSec xMaxInSec yMin yMax])
+                            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                            xlabel('Time (s)');
+                            title(prefix,'Interpreter','none');
+                        subplot(2,1,2)
+                            plot(xAxis,yFilteredLastSweep)
+                            hold on;
+                            plot(locsLast,pksLast,'o')
+                            yline(minPeakHeight)
+                            hold off;
+                            axis([xMinInSec xMaxInSec yMin yMax])
+                            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                            xlabel('Time (s)');
+                    
+                    % niceplot
+                    figure('name', strcat(prefix, '_AP_raster'));         
+                        subplot(3,1,1)
+                            % plot example trace
+                            plot(xAxis,smooth(d(:,mainDataCh,1),smoothSpan),'k','LineWidth',0.5)
+                            if ~isempty(lightPulseStartInSecs)
+                                rectangle('Position', [lightPulseStartInSecs yMin lightPulseDurInSecs yMax-yMin], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');
+                            end
+                            axis([xMinInSec xMaxInSec yMin yMax])
+                            set(gca,'Visible','off');
+                            % scale bars
+                            line([xMaxInSec-xScaleBar/1000 xMaxInSec],[yMin yMin],'Color','k')
+                            line([xMaxInSec xMaxInSec],[yMin yMin+yScaleBar],'Color','k')
+                            text(xMaxInSec-xRange/10, yMin+yRange*7/100, strcat(num2str(xScaleBar), " ms"));
+                            text(xMaxInSec-xRange/10, yMin+yRange*14/100, strcat(num2str(yScaleBar), " ", cell2mat(h.recChUnits(mainDataCh))));
+                            % -60 mV line
+                            yline(-60,'Color',[0, 0, 0, 0.5],'LineWidth',0.1)
+                            text(xMinInSec, yMin+yRange*7/100, "line @ -60 mV")
+                        subplot(3,1,2)
+                            % plot AP raster for all sweeps
+                            for sweep = 1:nSweeps
+                                plot(cell2mat(tsBySweep(sweep)), cell2mat(sweepNumberArrayBySweep(sweep)), '|', 'Color', 'k')
+                                hold on;
+                            end    
+                            % adding light stim
+                            if ~isempty(lightPulseStartInSecs)
+                                rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs nSweeps+1], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');    
+                            end
+                            % adding finishing touches to plot
+                            hold off;
+                            axis([xMinInSec xMaxInSec 0 nSweeps+1])
+                            ylabel(strcat('Sweeps (', num2str(nSweeps), ')'));
+                            yticks([]);
+                            xticks([]);
+                            set(gca, 'YDir','reverse');
+                            xlabel('Time (s)');
+                        subplot(3,1,3)
+                            % plot histogram and 2*SD criteria
+                            hold on;                    
+                            histogram('BinEdges', xMinInSec:lightPulseDurInSecs:xMaxInSec, 'BinCounts', firingHz, 'DisplayStyle', 'stairs', 'EdgeColor', 'k'); 
+                            % plot light stim as rectangle
+                            rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs ymaxhist], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');                       
+                            % plot Hz mean as horizontal line
+                            yline(hzPreLightMean, '--');
+                            % plot +- 2 SD as rectangle around mean
+                            % [x y width height]
+                            rectangle('Position', [0 hzPreLightMean-(2*hzPreLightStd) xMaxInSec 4*hzPreLightStd], 'FaceAlpha', 0.1, 'FaceColor', [0 0 0], 'EdgeColor', 'none');
+                            xlabel('Time (s)');
+                            ylabel('Firing rate (Hz)');
+                            axis([xMinInSec xMaxInSec 0 ymaxhist])
+                            yticks([0 ymaxhist]);
+                            hold off;
+                            title(prefix,'Interpreter','none');
+                end
             end
 
 
@@ -421,11 +485,13 @@ for row=firstRow:rows
                     % count APs before, during and after opto-stim
                     locsPreLight = locs(locs>=lightPulseStartInSecs-lightPulseDurInSecs & locs<lightPulseStartInSecs);
                     locsDuringLight = locs(locs>=lightPulseStartInSecs & locs<lightPulseStartInSecs+lightPulseDurInSecs);
-                    locsPostLight = locs(locs>=lightPulseStartInSecs+lightPulseDurInSecs & locs<lightPulseStartInSecs+2*lightPulseDurInSecs);              
+                    locsPostLight = locs(locs>=lightPulseStartInSecs+lightPulseDurInSecs & locs<lightPulseStartInSecs+2*lightPulseDurInSecs);  
+                    locs10sPostLight = locs(locs>=lightPulseStartInSecs+10 & locs<lightPulseStartInSecs+10+lightPulseDurInSecs);
                     % calculate firing rate before, during and after opto-stim
                     hzPreLightBySweep(sweep) = length(locsPreLight)/lightPulseDurInSecs;
                     hzDuringLightBySweep(sweep) = length(locsDuringLight)/lightPulseDurInSecs;
                     hzPostLightBySweep(sweep) = length(locsPostLight)/lightPulseDurInSecs;  
+                    hz10sPostLightBySweep(sweep) = length(locs10sPostLight)/lightPulseDurInSecs; 
                     % save first and last sweep (for quality control later)
                     if sweep == 1
                         yFilteredFirstSweep = yFiltered;
@@ -446,6 +512,8 @@ for row=firstRow:rows
                 hzDuringLightStd = std(hzDuringLightBySweep);
                 hzPostLightMean = mean(hzPostLightBySweep);
                 hzPostLightStd = std(hzPostLightBySweep);
+                hz10sPostLightMean = mean(hz10sPostLightBySweep);
+                hz10sPostLightStd = std(hz10sPostLightBySweep);
 
                 % determine light effect
                 if hzDuringLightMean < hzPreLightMean - 2*hzPreLightStd
@@ -456,106 +524,115 @@ for row=firstRow:rows
                     lightEffect = 0;
                 end
 
+                % determine recovery 10s after light
+                if hz10sPostLightStd >= hzPreLightMean - 2*hzPreLightStd && hz10sPostLightStd <= hzPreLightMean + 2*hzPreLightStd
+                    recovery10sAfterLight = 1;
+                else 
+                    recovery10sAfterLight = 0;
+                end
+
                 % organize data for histogram (counting APs accross all
                 % sweeps)
-                edges = [xMinInSec:xMaxInSec];
+                edges = xMinInSec:lightPulseDurInSecs:xMaxInSec;
                 [N, edges] = histcounts(allTimeStamps,edges);
-                firingHz = N/nSweeps;
+                firingHz = (1/lightPulseDurInSecs)*N/nSweeps;
                 
-                % quality control of bandpass filter
-                figure('name',strcat(prefix,'_filter_qc'))
-                    subplot(2,1,1)
-                        plot(xAxis,yFilteredFirstSweep,'b')
-                        hold on;
-                        plot(xAxis,d(:,mainDataCh,1),'r')
-                        hold off;
-                        axis([xMinInSec xMaxInSec -inf inf])
-                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-                        xlabel('Time (s)');
-                        title(prefix,'Interpreter','none');
-                    subplot(2,1,2)
-                        plot(xAxis,yFilteredLastSweep,'b')
-                        hold on;
-                        plot(xAxis,d(:,mainDataCh,nSweeps),'r')
-                        hold off;
-                        axis([xMinInSec xMaxInSec -inf inf])
-                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-                        xlabel('Time (s)');
-            
-                % quality control of found APs
-                figure('name', strcat(prefix, '_AP_qc'))
-                    subplot(2,1,1)
-                        plot(xAxis,yFilteredFirstSweep)
-                        hold on;
-                        plot(locsFirst,-pksFirst,'o')
-                        yline(-minPeakHeight)
-                        hold off;
-                        axis([xMinInSec xMaxInSec yMin yMax])
-                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-                        xlabel('Time (s)');
-                        title(prefix,'Interpreter','none');
-                    subplot(2,1,2)
-                        plot(xAxis,yFilteredLastSweep)
-                        hold on;
-                        plot(locsLast,-pksLast,'o')
-                        yline(-minPeakHeight)
-                        hold off;
-                        axis([xMinInSec xMaxInSec yMin yMax])
-                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-                        xlabel('Time (s)');
+                if plotFigs == 1
+                    % quality control of bandpass filter
+                    figure('name',strcat(prefix,'_filter_qc'))
+                        subplot(2,1,1)
+                            plot(xAxis,yFilteredFirstSweep,'b')
+                            hold on;
+                            plot(xAxis,d(:,mainDataCh,1),'r')
+                            hold off;
+                            axis([xMinInSec xMaxInSec -inf inf])
+                            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                            xlabel('Time (s)');
+                            title(prefix,'Interpreter','none');
+                        subplot(2,1,2)
+                            plot(xAxis,yFilteredLastSweep,'b')
+                            hold on;
+                            plot(xAxis,d(:,mainDataCh,nSweeps),'r')
+                            hold off;
+                            axis([xMinInSec xMaxInSec -inf inf])
+                            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                            xlabel('Time (s)');
                 
-                % niceplot
-                figure('name', strcat(prefix, '_AP_raster'));
-                    subplot(3,1,1)
-                        % plot example trace
-                        plot(xAxis,bandpass(d(:,mainDataCh,1),[highpassThreshold lowpassThreshold],samplingFrequency),'k','LineWidth',0.5)
-                        title(prefix,'Interpreter','none');
-                        if ~isempty(lightPulseStartInSecs)
-                            rectangle('Position', [lightPulseStartInSecs yMin lightPulseDurInSecs yRange], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');
-                        end
-                        axis([xMinInSec xMaxInSec yMin yMax])
-                        set(gca,'Visible','off');
-                        % scale bars
-                        line([xMaxInSec-xScaleBar/1000 xMaxInSec],[yMin yMin],'Color','k')
-                        line([xMaxInSec xMaxInSec],[yMin yMin+yScaleBar],'Color','k')
-                        text(xMaxInSec-xRange/10, yMin+yRange*7/100, strcat(num2str(xScaleBar), " ms"));
-                        text(xMaxInSec-xRange/10, yMin+yRange*14/100, strcat(num2str(yScaleBar), " ", cell2mat(h.recChUnits(mainDataCh))));      
-                    subplot(3,1,2)
-                        % plot AP raster for all sweeps
-                        for sweep = 1:nSweeps
-                            if size(tsBySweep,2)>=sweep
-                                plot(cell2mat(tsBySweep(sweep)), cell2mat(sweepNumberArrayBySweep(sweep)), '|', 'Color', 'k')
-                                hold on;
+                    % quality control of found APs
+                    figure('name', strcat(prefix, '_AP_qc'))
+                        subplot(2,1,1)
+                            plot(xAxis,yFilteredFirstSweep)
+                            hold on;
+                            plot(locsFirst,-pksFirst,'o')
+                            yline(-minPeakHeight)
+                            hold off;
+                            axis([xMinInSec xMaxInSec yMin yMax])
+                            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                            xlabel('Time (s)');
+                            title(prefix,'Interpreter','none');
+                        subplot(2,1,2)
+                            plot(xAxis,yFilteredLastSweep)
+                            hold on;
+                            plot(locsLast,-pksLast,'o')
+                            yline(-minPeakHeight)
+                            hold off;
+                            axis([xMinInSec xMaxInSec yMin yMax])
+                            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                            xlabel('Time (s)');
+                    
+                    % niceplot
+                    figure('name', strcat(prefix, '_AP_raster'));
+                        subplot(3,1,1)
+                            % plot example trace
+                            plot(xAxis,bandpass(d(:,mainDataCh,1),[highpassThreshold lowpassThreshold],samplingFrequency),'k','LineWidth',0.5)
+                            if ~isempty(lightPulseStartInSecs)
+                                rectangle('Position', [lightPulseStartInSecs yMin lightPulseDurInSecs yRange], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');
                             end
-                        end    
-                        % adding light stim
-                        if ~isempty(lightPulseStartInSecs)
-                            rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs nSweeps+1], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');    
-                        end
-                        % adding finishing touches to plot
-                        hold off;
-                        axis([xMinInSec xMaxInSec 0 nSweeps+1])
-                        ylabel(strcat('Sweeps (', num2str(nSweeps), ')'));
-                        yticks([]);
-                        xticks([]);
-                        set(gca, 'YDir','reverse');
-                        xlabel('Time (s)');  
-                    subplot(3,1,3)
-                        % plot histogram and 2*SD criteria
-                        hold on;                    
-                        histogram('BinEdges', xMinInSec:xMaxInSec, 'BinCounts', firingHz, 'DisplayStyle', 'stairs', 'EdgeColor', 'k'); 
-                        % plot light stim as rectangle
-                        rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs ymaxhist], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');                       
-                        % plot Hz mean as horizontal line
-                        yline(hzPreLightMean, '--');
-                        % plot +- 2 SD as rectangle around mean
-                        % [x y width height]
-                        rectangle('Position', [0 hzPreLightMean-(2*hzPreLightStd) xMaxInSec 4*hzPreLightStd], 'FaceAlpha', 0.1, 'FaceColor', [0 0 0], 'EdgeColor', 'none');
-                        xlabel('Time (s)');
-                        ylabel('Firing rate (Hz)');
-                        axis([xMinInSec xMaxInSec 0 ymaxhist])
-                        yticks([0 ymaxhist]);
-                        hold off;
+                            axis([xMinInSec xMaxInSec yMin yMax])
+                            set(gca,'Visible','off');
+                            % scale bars
+                            line([xMaxInSec-xScaleBar/1000 xMaxInSec],[yMin yMin],'Color','k')
+                            line([xMaxInSec xMaxInSec],[yMin yMin+yScaleBar],'Color','k')
+                            text(xMaxInSec-xRange/10, yMin+yRange*7/100, strcat(num2str(xScaleBar), " ms"));
+                            text(xMaxInSec-xRange/10, yMin+yRange*14/100, strcat(num2str(yScaleBar), " ", cell2mat(h.recChUnits(mainDataCh))));      
+                        subplot(3,1,2)
+                            % plot AP raster for all sweeps
+                            for sweep = 1:nSweeps
+                                if size(tsBySweep,2)>=sweep
+                                    plot(cell2mat(tsBySweep(sweep)), cell2mat(sweepNumberArrayBySweep(sweep)), '|', 'Color', 'k')
+                                    hold on;
+                                end
+                            end    
+                            % adding light stim
+                            if ~isempty(lightPulseStartInSecs)
+                                rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs nSweeps+1], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');    
+                            end
+                            % adding finishing touches to plot
+                            hold off;
+                            axis([xMinInSec xMaxInSec 0 nSweeps+1])
+                            ylabel(strcat('Sweeps (', num2str(nSweeps), ')'));
+                            yticks([]);
+                            xticks([]);
+                            set(gca, 'YDir','reverse');
+                            xlabel('Time (s)');  
+                        subplot(3,1,3)
+                            % plot histogram and 2*SD criteria
+                            hold on;                    
+                            histogram('BinEdges', xMinInSec:lightPulseDurInSecs:xMaxInSec, 'BinCounts', firingHz, 'DisplayStyle', 'stairs', 'EdgeColor', 'k'); 
+                            % plot light stim as rectangle
+                            rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs ymaxhist], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');                       
+                            % plot Hz mean as horizontal line
+                            yline(hzPreLightMean, '--');
+                            % plot +- 2 SD as rectangle around mean
+                            % [x y width height]
+                            rectangle('Position', [0 hzPreLightMean-(2*hzPreLightStd) xMaxInSec 4*hzPreLightStd], 'FaceAlpha', 0.1, 'FaceColor', [0 0 0], 'EdgeColor', 'none');
+                            xlabel('Time (s)');
+                            ylabel('Firing rate (Hz)');
+                            axis([xMinInSec xMaxInSec 0 ymaxhist])
+                            yticks([0 ymaxhist]);
+                            hold off;
+                            title(prefix,'Interpreter','none');
+                end
             end
 
 
@@ -601,11 +678,13 @@ for row=firstRow:rows
                     % count APs before, during and after opto-stim
                     locsPreLight = locs(locs>=lightPulseStartInSecs-lightPulseDurInSecs & locs<lightPulseStartInSecs);
                     locsDuringLight = locs(locs>=lightPulseStartInSecs & locs<lightPulseStartInSecs+lightPulseDurInSecs);
-                    locsPostLight = locs(locs>=lightPulseStartInSecs+lightPulseDurInSecs & locs<lightPulseStartInSecs+2*lightPulseDurInSecs);              
+                    locsPostLight = locs(locs>=lightPulseStartInSecs+lightPulseDurInSecs & locs<lightPulseStartInSecs+2*lightPulseDurInSecs);
+                    locs10sPostLight = locs(locs>=lightPulseStartInSecs+10 & locs<lightPulseStartInSecs+10+lightPulseDurInSecs);
                     % calculate firing rate before, during and after opto-stim
                     hzPreLightBySweep(sweep) = length(locsPreLight)/lightPulseDurInSecs;
                     hzDuringLightBySweep(sweep) = length(locsDuringLight)/lightPulseDurInSecs;
-                    hzPostLightBySweep(sweep) = length(locsPostLight)/lightPulseDurInSecs;  
+                    hzPostLightBySweep(sweep) = length(locsPostLight)/lightPulseDurInSecs; 
+                    hz10sPostLightBySweep(sweep) = length(locs10sPostLight)/lightPulseDurInSecs; 
                     % save first and last sweep (for quality control later)
                     if sweep == 1
                         yFilteredFirstSweep = yFiltered;
@@ -626,6 +705,8 @@ for row=firstRow:rows
                 hzDuringLightStd = std(hzDuringLightBySweep);
                 hzPostLightMean = mean(hzPostLightBySweep);
                 hzPostLightStd = std(hzPostLightBySweep);
+                hz10sPostLightMean = mean(hz10sPostLightBySweep);
+                hz10sPostLightStd = std(hz10sPostLightBySweep);
 
                 % determine light effect
                 if hzDuringLightMean < hzPreLightMean - 2*hzPreLightStd
@@ -636,107 +717,190 @@ for row=firstRow:rows
                     lightEffect = 0;
                 end
 
+                % determine recovery 10s after light
+                if hz10sPostLightStd >= hzPreLightMean - 2*hzPreLightStd && hz10sPostLightStd <= hzPreLightMean + 2*hzPreLightStd
+                    recovery10sAfterLight = 1;
+                else 
+                    recovery10sAfterLight = 0;
+                end
+
                 % organize data for histogram (counting APs accross all
                 % sweeps)
-                edges = [xMinInSec:xMaxInSec];
+                edges = xMinInSec:lightPulseDurInSecs:xMaxInSec;
                 [N, edges] = histcounts(allTimeStamps,edges);
-                firingHz = N/nSweeps;
+                firingHz = (1/lightPulseDurInSecs)*N/nSweeps;
                 
-                % quality control of bandpass filter
-                figure('name',strcat(prefix,'_filter_qc'))
-                    subplot(2,1,1)
-                        plot(xAxis,yFilteredFirstSweep,'b')
-                        hold on;
-                        plot(xAxis,d(:,mainDataCh,1),'r')
-                        hold off;
-                        axis([xMinInSec xMaxInSec -inf inf])
-                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-                        xlabel('Time (s)');
-                        title(prefix,'Interpreter','none');
-                    subplot(2,1,2)
-                        plot(xAxis,yFilteredLastSweep,'b')
-                        hold on;
-                        plot(xAxis,d(:,mainDataCh,nSweeps),'r')
-                        hold off;
-                        axis([xMinInSec xMaxInSec -inf inf])
-                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-                        xlabel('Time (s)');
-            
-                % quality control of found APs
-                figure('name', strcat(prefix, '_AP_qc'))
-                    subplot(2,1,1)
-                        plot(xAxis,yFilteredFirstSweep)
-                        hold on;
-                        plot(locsFirst,-pksFirst,'o')
-                        yline(-minPeakHeight)
-                        hold off;
-                        axis([xMinInSec xMaxInSec yMin yMax])
-                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-                        xlabel('Time (s)');
-                        title(prefix,'Interpreter','none');
-                    subplot(2,1,2)
-                        plot(xAxis,yFilteredLastSweep)
-                        hold on;
-                        plot(locsLast,-pksLast,'o')
-                        yline(-minPeakHeight)
-                        hold off;
-                        axis([xMinInSec xMaxInSec yMin yMax])
-                        ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-                        xlabel('Time (s)');
-                
-                % niceplot
-                figure('name', strcat(prefix, '_AP_raster'));
-                    subplot(3,1,1)
-                        % plot example trace
-                        plot(xAxis,bandpass(d(:,mainDataCh,1),[highpassThreshold lowpassThreshold],samplingFrequency),'k','LineWidth',0.5)
-                        if ~isempty(lightPulseStartInSecs)
-                            rectangle('Position', [lightPulseStartInSecs yMin lightPulseDurInSecs yRange], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');
-                        end
-                        axis([xMinInSec xMaxInSec yMin yMax])
-                        set(gca,'Visible','off');
-                        % scale bars
-                        line([xMaxInSec-xScaleBar/1000 xMaxInSec],[yMin yMin],'Color','k')
-                        line([xMaxInSec xMaxInSec],[yMin yMin+yScaleBar],'Color','k')
-                        text(xMaxInSec-xRange/10, yMin+yRange*7/100, strcat(num2str(xScaleBar), " ms"));
-                        text(xMaxInSec-xRange/10, yMin+yRange*14/100, strcat(num2str(yScaleBar), " ", cell2mat(h.recChUnits(mainDataCh))));  
-                        title(prefix,'Interpreter','none');
-                    subplot(3,1,2)
-                        % plot AP raster for all sweeps
-                        for sweep = 1:nSweeps
-                            plot(cell2mat(tsBySweep(sweep)), cell2mat(sweepNumberArrayBySweep(sweep)), '|', 'Color', 'k')
+                if plotFigs == 1
+                    % quality control of bandpass filter
+                    figure('name',strcat(prefix,'_filter_qc'))
+                        subplot(2,1,1)
+                            plot(xAxis,yFilteredFirstSweep,'b')
                             hold on;
-                        end    
-                        % adding light stim
-                        if ~isempty(lightPulseStartInSecs)
-                            rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs nSweeps+1], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');    
-                        end
-                        % adding finishing touches to plot
-                        hold off;
-                        axis([xMinInSec xMaxInSec 0 nSweeps+1])
-                        ylabel(strcat('Sweeps (', num2str(nSweeps), ')'));
-                        yticks([]);
-                        xticks([]);
-                        set(gca, 'YDir','reverse');
-                        xlabel('Time (s)');  
-                    subplot(3,1,3)
-                        % plot histogram and 2*SD criteria
-                        hold on;                    
-                        histogram('BinEdges', xMinInSec:xMaxInSec, 'BinCounts', firingHz, 'DisplayStyle', 'stairs', 'EdgeColor', 'k'); 
-                        % plot light stim as rectangle
-                        rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs ymaxhist], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');                       
-                        % plot Hz mean as horizontal line
-                        yline(hzPreLightMean, '--');
-                        % plot +- 2 SD as rectangle around mean
-                        % [x y width height]
-                        rectangle('Position', [0 hzPreLightMean-(2*hzPreLightStd) 30 4*hzPreLightStd], 'FaceAlpha', 0.1, 'FaceColor', [0 0 0], 'EdgeColor', 'none');
-                        xlabel('Time (s)');
-                        ylabel('Firing rate (Hz)');
-                        axis([xMinInSec xMaxInSec 0 ymaxhist])
-                        yticks([0 ymaxhist]);
-                        hold off;
+                            plot(xAxis,d(:,mainDataCh,1),'r')
+                            hold off;
+                            axis([xMinInSec xMaxInSec -inf inf])
+                            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                            xlabel('Time (s)');
+                            title(prefix,'Interpreter','none');
+                        subplot(2,1,2)
+                            plot(xAxis,yFilteredLastSweep,'b')
+                            hold on;
+                            plot(xAxis,d(:,mainDataCh,nSweeps),'r')
+                            hold off;
+                            axis([xMinInSec xMaxInSec -inf inf])
+                            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                            xlabel('Time (s)');
+                
+                    % quality control of found APs
+                    figure('name', strcat(prefix, '_AP_qc'))
+                        subplot(2,1,1)
+                            plot(xAxis,yFilteredFirstSweep)
+                            hold on;
+                            plot(locsFirst,-pksFirst,'o')
+                            yline(-minPeakHeight)
+                            hold off;
+                            axis([xMinInSec xMaxInSec yMin yMax])
+                            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                            xlabel('Time (s)');
+                            title(prefix,'Interpreter','none');
+                        subplot(2,1,2)
+                            plot(xAxis,yFilteredLastSweep)
+                            hold on;
+                            plot(locsLast,-pksLast,'o')
+                            yline(-minPeakHeight)
+                            hold off;
+                            axis([xMinInSec xMaxInSec yMin yMax])
+                            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                            xlabel('Time (s)');
+                    
+                    % niceplot
+                    figure('name', strcat(prefix, '_AP_raster'));
+                        subplot(3,1,1)
+                            % plot example trace
+                            plot(xAxis,bandpass(d(:,mainDataCh,1),[highpassThreshold lowpassThreshold],samplingFrequency),'k','LineWidth',0.5)
+                            if ~isempty(lightPulseStartInSecs)
+                                rectangle('Position', [lightPulseStartInSecs yMin lightPulseDurInSecs yRange], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');
+                            end
+                            axis([xMinInSec xMaxInSec yMin yMax])
+                            set(gca,'Visible','off');
+                            % scale bars
+                            line([xMaxInSec-xScaleBar/1000 xMaxInSec],[yMin yMin],'Color','k')
+                            line([xMaxInSec xMaxInSec],[yMin yMin+yScaleBar],'Color','k')
+                            text(xMaxInSec-xRange/10, yMin+yRange*7/100, strcat(num2str(xScaleBar), " ms"));
+                            text(xMaxInSec-xRange/10, yMin+yRange*14/100, strcat(num2str(yScaleBar), " ", cell2mat(h.recChUnits(mainDataCh))));  
+                        subplot(3,1,2)
+                            % plot AP raster for all sweeps
+                            for sweep = 1:nSweeps
+                                plot(cell2mat(tsBySweep(sweep)), cell2mat(sweepNumberArrayBySweep(sweep)), '|', 'Color', 'k')
+                                hold on;
+                            end    
+                            % adding light stim
+                            if ~isempty(lightPulseStartInSecs)
+                                rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs nSweeps+1], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');    
+                            end
+                            % adding finishing touches to plot
+                            hold off;
+                            axis([xMinInSec xMaxInSec 0 nSweeps+1])
+                            ylabel(strcat('Sweeps (', num2str(nSweeps), ')'));
+                            yticks([]);
+                            xticks([]);
+                            set(gca, 'YDir','reverse');
+                            xlabel('Time (s)');  
+                        subplot(3,1,3)
+                            % plot histogram and 2*SD criteria
+                            hold on;                    
+                            histogram('BinEdges', xMinInSec:lightPulseDurInSecs:xMaxInSec, 'BinCounts', firingHz, 'DisplayStyle', 'stairs', 'EdgeColor', 'k'); 
+                            % plot light stim as rectangle
+                            rectangle('Position', [lightPulseStartInSecs 0 lightPulseDurInSecs ymaxhist], 'FaceAlpha', 0.5, 'FaceColor', ostimColor, 'EdgeColor', 'none');                       
+                            % plot Hz mean as horizontal line
+                            yline(hzPreLightMean, '--');
+                            % plot +- 2 SD as rectangle around mean
+                            % [x y width height]
+                            rectangle('Position', [0 hzPreLightMean-(2*hzPreLightStd) 30 4*hzPreLightStd], 'FaceAlpha', 0.1, 'FaceColor', [0 0 0], 'EdgeColor', 'none');
+                            xlabel('Time (s)');
+                            ylabel('Firing rate (Hz)');
+                            axis([xMinInSec xMaxInSec 0 ymaxhist])
+                            yticks([0 ymaxhist]);
+                            hold off;
+                            title(prefix,'Interpreter','none');
+                end
+            end
+
+            % save data for exporting later
+            if recordingType == "WC_CC" | recordingType == "LS_VC" | recordingType == "LS_CC"
+                % I had to use convertCharsToStrings because the function
+                % "table" does not like chars, but it accepts strings
+                mouseNameByFile = [mouseNameByFile; convertCharsToStrings(mouseName)];
+                mouseSexByFile = [mouseSexByFile; convertCharsToStrings(mouseSex)];
+                cellNameByFile = [cellNameByFile; convertCharsToStrings(cellName)];
+                opsinExpressionByFile = [opsinExpressionByFile; convertCharsToStrings(opsinExpression)];
+                LEDcolorByFile = [LEDcolorByFile; convertCharsToStrings(LEDcolor)];
+                LEDpowerByFile = [LEDpowerByFile; convertCharsToStrings(LEDpower)];
+                recordingTypeByFile = [recordingTypeByFile; convertCharsToStrings(recordingType)];
+                abfFileNameByFile = [abfFileNameByFile; convertCharsToStrings(abfFileName)];
+                sweepDurationInSecondsByFile = [sweepDurationInSecondsByFile; sweepDurationInSeconds];
+                lightPulseDurInSecsByFile = [lightPulseDurInSecsByFile; lightPulseDurInSecs];
+                hzPreLightMeanByFile = [hzPreLightMeanByFile; hzPreLightMean]; 
+                hzPreLightStdByFile = [hzPreLightStdByFile; hzPreLightStd];                 
+                hzDuringLightMeanByFile = [hzDuringLightMeanByFile; hzDuringLightMean];               
+                hzDuringLightStdByFile = [hzDuringLightStdByFile; hzDuringLightStd];
+                hzPostLightMeanByFile = [hzPostLightMeanByFile; hzPostLightMean];
+                hzPostLightStdByFile = [hzPostLightStdByFile; hzPostLightStd];
+                hz10sPostLightMeanByFile = [hz10sPostLightMeanByFile; hz10sPostLightMean];
+                hz10sPostLightStdByFile = [hz10sPostLightStdByFile; hz10sPostLightStd];
+                lightEffectByFile = [lightEffectByFile; lightEffect];
+                recovery10sAfterLightByFile = [recovery10sAfterLightByFile; recovery10sAfterLight];
             end
         end
-        saveAllFigs('/Users/priscilla/OHSU Dropbox/Priscilla Ambrosi/Dropbox - Moss Lab/Lab - Data summaries/2024-12-08 iChloc analysis'); close all
+
+        if saveFigs == 1
+            saveAllFigs(saveDir); close all
+        end
+
+        if saveData == 1
+            % only try to save data if you actually have data to save
+            if length(hzPreLightMeanByFile)>=1
+
+                % use "categorical" so that table output will not have quotes around strings                
+                mouse = categorical(mouseNameByFile);
+                sex = categorical(mouseSexByFile);
+                cell = categorical(cellNameByFile);
+                opsin = categorical(opsinExpressionByFile);
+                color = categorical(LEDcolorByFile);
+                power = categorical(LEDpowerByFile);
+                type = categorical(recordingTypeByFile);
+                abf = categorical(abfFileNameByFile);
+
+                spontFiringDataAsTable = table(mouse,...
+                    sex,...
+                    cell,...
+                    opsin,...
+                    color,...
+                    power,...
+                    type,...
+                    abf,...
+                    sweepDurationInSecondsByFile,...
+                    lightPulseDurInSecsByFile,...
+                    hzPreLightMeanByFile,...
+                    hzPreLightStdByFile,...
+                    hzDuringLightMeanByFile,...
+                    hzDuringLightStdByFile,...
+                    hzPostLightMeanByFile,...
+                    hzPostLightStdByFile,...
+                    hz10sPostLightMeanByFile,...
+                    hz10sPostLightStdByFile,...
+                    lightEffectByFile,...
+                    recovery10sAfterLightByFile);
+
+                fulldirectory = fullfile(saveDir,strcat(analysisDate, "_ephys_database_spont_firing.xls"));
+                if analyzeOnlyOneRow == 1
+                    fulldirectory = fullfile(saveDir,strcat(analysisDate, "_ephys_database_spont_firing_ONE_BOI.xls"));
+                    disp('yo copy this data into the main data OR ELSE')
+                end
+                writetable(spontFiringDataAsTable, fulldirectory, 'WriteMode', 'overwritesheet');
+                disp('I saved the cell spont firing  xls file')
+            end
+        end
     end
 end
 
