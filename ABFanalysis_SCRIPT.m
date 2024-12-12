@@ -81,7 +81,7 @@ database = readtable(databaseFile, opts);
 % one cell can be represented by multiple rows
 rows = height(database);
 
-% is user only wants to analye 1 row, overwrite the variable "rows"
+% if user only wants to analye 1 row, overwrite the variable "rows"
 if analyzeOnlyOneRow == 1
     rows = firstRow;
 end
