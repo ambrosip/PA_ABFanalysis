@@ -23,11 +23,11 @@ smooth_cellAttached = 1;
 bandpass_cellAttached = 1;
 highpassThreshold = 5;    % in Hz
 lowpassThreshold = 20000;    % in Hz
-minPeakHeight = -20;        % amplitude threshold
+minPeakHeight = 20;        % amplitude threshold
 minPeakDistance = 0.005;   % in seconds
 example_sweep = 1;
 cmd_y_scaleBarSize = 25;    % in pA
-data_y_scaleBarSize = 50;   % in pA
+data_y_scaleBarSize = 10;   % in pA
 time_scaleBarSize = 1;      % in s
 
 saveFigs = 1;
@@ -121,7 +121,7 @@ if rec_type == "WC_CC_spont"
         % create arrays that will be filled
         tsBySweep = cell(1,nSweeps);
         sweepNumberArrayBySweep = cell(1,nSweeps);
-        firingRateBySweep = zeros(nSweeps,1);
+        firingRateAvgBySweep = zeros(nSweeps,1);
     
         % iterate through sweeps
         for sweep=1:nSweeps
@@ -132,7 +132,14 @@ if rec_type == "WC_CC_spont"
             % collect sweep-by-sweep data
             tsBySweep{1,sweep} = locs;
             sweepNumberArrayBySweep{1,sweep} = sweepNumberArray;
-            firingRateBySweep(sweep,1) = size(locs,1) / sweepDurationInSeconds;  % in Hz
+            firingRateAvgBySweep(sweep,1) = size(locs,1) / sweepDurationInSeconds;  % in Hz
+
+            % save example sweep (for plotting later)
+            if sweep == example_sweep
+                yFilteredExampleSweep = yFiltered;
+                pksExample = pks;
+                locsExample = locs;
+            end
         end   
     
         if plot_QC == 1
@@ -154,7 +161,7 @@ if rec_type == "WC_CC_spont"
 
             subplot(3,1,1)
                 % plot example traces
-                plot(xAxis,smooth(d(:,mainDataCh,example_sweep),smoothSpan),'k','LineWidth',0.5)
+                plot(xAxis,yFilteredExampleSweep,'k','LineWidth',0.5)
                 axis([xMinInSec xMaxInSec yMin yMax])
                 set(gca,'Visible','off');
                 % scale bars
@@ -199,7 +206,7 @@ if rec_type == "WC_CC_spont"
             
             subplot(2,1,1)
                 % plot example traces
-                plot(xAxis,smooth(d(:,mainDataCh,example_sweep),smoothSpan),'k','LineWidth',0.5)
+                plot(xAxis,yFilteredExampleSweep,'k','LineWidth',0.5)
                 axis([xMinInSec xMaxInSec yMin yMax])
                 set(gca,'Visible','off');
                 % scale bars
@@ -247,7 +254,7 @@ if cellAttached == 1 || extractBefore(rec_type,"_") == "ON" || extractBefore(rec
     % create arrays that will be filled
     tsBySweep = cell(1,nSweeps);
     sweepNumberArrayBySweep = cell(1,nSweeps);
-    firingRateBySweep = zeros(nSweeps,1);
+    firingRateAvgBySweep = zeros(nSweeps,1);
 
     % iterate through sweeps
     for sweep=1:nSweeps
@@ -259,7 +266,7 @@ if cellAttached == 1 || extractBefore(rec_type,"_") == "ON" || extractBefore(rec
         elseif smooth_cellAttached == 1 & bandpass_cellAttached == 0
             yFiltered = smooth(d(:,mainDataCh,sweep),smoothSpan);
         end
-        [pks,locs,w,p] = findpeaks(yFiltered,xAxis,'MinPeakHeight',-minPeakHeight,'MinPeakDistance',minPeakDistance);
+        [pks,locs,w,p] = findpeaks(yFiltered,xAxis,'MinPeakHeight',minPeakHeight,'MinPeakDistance',minPeakDistance);
         sweepNumberArray = sweep.* ones(length(locs),1);
 
         % save first and last sweep (to save time later)
@@ -273,10 +280,17 @@ if cellAttached == 1 || extractBefore(rec_type,"_") == "ON" || extractBefore(rec
             locsLast = locs;
         end
 
+        % save example sweep (for plotting later)
+        if sweep == example_sweep
+            yFilteredExampleSweep = yFiltered;
+            pksExample = pks;
+            locsExample = locs;
+        end
+
         % collect sweep-by-sweep data
         tsBySweep{1,sweep} = locs;
         sweepNumberArrayBySweep{1,sweep} = sweepNumberArray;
-        firingRateBySweep(sweep,1) = size(locs,1) / sweepDurationInSeconds;  % in Hz
+        firingRateAvgBySweep(sweep,1) = size(locs,1) / sweepDurationInSeconds;  % in Hz
     end
 
     if plot_QC == 1
@@ -305,7 +319,7 @@ if cellAttached == 1 || extractBefore(rec_type,"_") == "ON" || extractBefore(rec
             plot(xAxis,yFilteredFirstSweep)
             hold on;
             plot(locsFirst,pksFirst,'o')
-            yline(-minPeakHeight)
+            yline(minPeakHeight)
             hold off;
             axis([xMinInSec xMaxInSec yMin yMax])
             ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
@@ -314,7 +328,7 @@ if cellAttached == 1 || extractBefore(rec_type,"_") == "ON" || extractBefore(rec
             plot(xAxis,yFilteredLastSweep)
             hold on;
             plot(locsLast,pksLast,'o')
-            yline(-minPeakHeight)
+            yline(minPeakHeight)
             hold off;
             axis([xMinInSec xMaxInSec yMin yMax])
             ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
@@ -325,7 +339,7 @@ if cellAttached == 1 || extractBefore(rec_type,"_") == "ON" || extractBefore(rec
     figure('name', strcat(fileName, '_cell_attached_raster'));
     subplot(2,1,1)
         % plot example trace
-        plot(xAxis,bandpass(d(:,mainDataCh,example_sweep),[highpassThreshold lowpassThreshold],samplingFrequency),'k','LineWidth',0.5)
+        plot(xAxis,yFilteredExampleSweep,'k','LineWidth',0.5)
         axis([xMinInSec xMaxInSec yMin yMax])
         set(gca,'Visible','off');
         % scale bars
