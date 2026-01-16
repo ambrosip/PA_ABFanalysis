@@ -1,7 +1,7 @@
 
 %% USER INPUT
 
-fileDir = 'M:\EphysData\20251212\2025_12_12_0006.abf';
+fileDir = "M:\EphysData\20260114\2026_01_14_0048.abf";
 smoothSpan = 5;
 xMinInSec = 0;
 xMaxInSec = 3;
@@ -28,7 +28,8 @@ time_scaleBarSize = 0.5; % in s
 [d,si,h]=abfload(fileDir);
 
 % get file name
-fileName = fileDir(end-18:end-4);
+% fileName = fileDir(end-18:end-4);
+[filepath,fileName,ext]=fileparts(fileDir);
 
 % convert sampling interval into sampling frequency
 % si is the sampling interval in us

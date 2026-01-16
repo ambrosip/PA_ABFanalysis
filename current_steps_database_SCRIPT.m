@@ -6,7 +6,7 @@ close all;
 
 databaseFile = 'M:\EphysData\Ephys Database.xlsx';
 sheetName = 'TH Gq-DREADDs';
-saveDir = "C:\Users\ambrosi\OHSU Dropbox\Priscilla Ambrosi\Dropbox - Moss Lab\Lab - Data summaries\2025-12-18 ephys dreadds";
+saveDir = "C:\Users\ambrosi\OHSU Dropbox\Priscilla Ambrosi\Dropbox - Moss Lab\Lab - Data summaries\2026-01-15 ephys dreadds";
 firstRow = 1;          % set firstRow to be analyzed - remember to account for header when counting rows!
 analyzeOnlyOneRow = 0;  % 1 (yes) or 0 (no)
 saveFigs = 1;
