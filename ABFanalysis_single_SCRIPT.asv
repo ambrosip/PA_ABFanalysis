@@ -1,10 +1,7 @@
-clear all
-close all
 
 %% USER INPUT
 
-fileDir = 'M:\EphysData\20260303\2026_03_03_0043.abf';  % use single quotes
-saveDir = 'M:\EphysData\20260303\Matlab';
+fileDir = 'M:\EphysData\20260303\2026_03_03_0003.abf';  % use single quotes
 mainDataCh = 1;     % channel with recording from cell
 smoothSpan = 5;
 xMinInSec = 0;
@@ -26,19 +23,14 @@ lightCh = 4;        % channel with opto stim. 3 is B. 4 is GR
 cmdCh = 2;
 
 % niceplot
-xMinInSecNiceplot_VC = 0;
-xMaxInSecNiceplot_VC = 2.5;
-xMinInSecNiceplot_CC = 1.45;
-xMaxInSecNiceplot_CC = 1.55;
+xMinInSecNiceplot = 0;
+xMaxInSecNiceplot = 4;
 yMinNiceplot_main = -500;
 yMaxNiceplot_main = 500;
 yMinNiceplot_cmd = -70;
-yMaxNiceplot_cmd = -55;
+yMaxNiceplot_cmd = -50;
 yMinNiceplot_light = -5;
 yMaxNiceplot_light = 10;
-
-saveFigs = 0;
-plotAllCh = 1;
 
 
 %% MAIN CODE
@@ -81,147 +73,84 @@ lightPulseDurInSecs = lightPulseEndInSecs - lightPulseStartInSecs;
 % create matrix that will be filled
 yFiltered_All=zeros(h.sweepLengthInPts,nSweeps);
 
-if plotAllCh == 1
-    % plot all the channels and sweeps
-    figure('name',strcat(fileName,'_all'))
-    for channel=1:nChannels
-        subplot(nChannels,1,channel)
-        for sweep=1:nSweeps
-            yFiltered = smooth(d(:,channel,sweep),smoothSpan);
-            yFiltered_All(:,sweep) = yFiltered;
-            plot(xAxis,yFiltered,'Color',[0, 0, 0, 0.25]);
-            hold on;
-        end
-        % calculate mean
-        yMean = sum(yFiltered_All,2)/nSweeps;
-        plot(xAxis,yMean,'Color',[0, 0, 0, 1]);
-        hold off;
-        ylabel(strcat(cell2mat(h.recChNames(channel)), " (", (cell2mat(h.recChUnits(channel))), ")"));
-        axis([xMinInSec xMaxInSec -inf inf])
+% plot all the channels and sweeps
+figure('name',strcat(fileName,'_all'))
+for channel=1:nChannels
+    subplot(nChannels,1,channel)
+    for sweep=1:nSweeps
+        yFiltered = smooth(d(:,channel,sweep),smoothSpan);
+        yFiltered_All(:,sweep) = yFiltered;
+        plot(xAxis,yFiltered,'Color',[0, 0, 0, 0.25]);
+        hold on;
     end
-    xlabel('Time (s)');
+    % calculate mean
+    yMean = sum(yFiltered_All,2)/nSweeps;
+    plot(xAxis,yMean,'Color',[0, 0, 0, 1]);
+    hold off;
+    ylabel(strcat(cell2mat(h.recChNames(channel)), " (", (cell2mat(h.recChUnits(channel))), ")"));
+    axis([xMinInSec xMaxInSec -inf inf])
 end
+xlabel('Time (s)');
 
-% % plot the 1st sweep of all the channels to compare filtered vs not
-% % filtered data
-% figure('name',strcat(fileName,'_filtered vs not'))
-% for channel=1:nChannels
-%     subplot(nChannels,1,channel)
-%     plot(xAxis,d(:,channel,sweep),'Color','b');
-%     hold on;
-%     yFiltered = smooth(d(:,channel,sweep),smoothSpan);
-%     plot(xAxis,yFiltered,'Color','r');
-%     hold off;
-%     ylabel(strcat(cell2mat(h.recChNames(channel)), " (", (cell2mat(h.recChUnits(channel))), ")"));
-%     axis([xMinInSec xMaxInSec -inf inf])
-% end
-% xlabel('Time (s)');
-
-% niceplot WC VC
-if strcmp(cell2mat(h.recChUnits(mainDataCh)),'pA')
-    figure('name',strcat(fileName,'_niceplot VC'))
-    
-        subplot(4,1,[1,2])
-            for sweep=1:nSweeps
-                yFiltered_main = smooth(d(:,mainDataCh,sweep),smoothSpan);
-                yFiltered_main_All(:,sweep) = yFiltered_main;
-                plot(xAxis,yFiltered_main,'Color',[0, 0, 0, 0.25]);
-                hold on;
-            end
-            yMean_main = sum(yFiltered_main_All,2)/nSweeps;
-            plot(xAxis,yMean_main,'Color',[0, 0, 0, 1]);
-            hold off;
-            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-            axis([xMinInSecNiceplot_VC xMaxInSecNiceplot_VC yMinNiceplot_main yMaxNiceplot_main])
-            title([fileName '_niceplot'],'Interpreter','none');
-    
-        subplot(4,1,3)
-            for sweep=1:nSweeps
-                yFiltered_cmd = smooth(d(:,cmdCh,sweep),smoothSpan);
-                yFiltered_cmd_All(:,sweep) = yFiltered_cmd;
-                plot(xAxis,yFiltered_cmd,'Color',[0, 0, 0, 0.25]);
-                hold on;
-            end
-            yMean_cmd = sum(yFiltered_cmd_All,2)/nSweeps;
-            plot(xAxis,yMean_cmd,'Color',[0, 0, 0, 1]);
-            hold off;
-            ylabel(strcat(cell2mat(h.recChNames(cmdCh)), " (", (cell2mat(h.recChUnits(cmdCh))), ")"));
-            axis([xMinInSecNiceplot_VC xMaxInSecNiceplot_VC yMinNiceplot_cmd yMaxNiceplot_cmd])
-    
-        subplot(4,1,4)
-            for sweep=1:nSweeps
-                yFiltered_light = smooth(d(:,lightCh,sweep),smoothSpan);
-                yFiltered_light_All(:,sweep) = yFiltered_light;
-                plot(xAxis,yFiltered_light,'Color',[0, 0, 0, 0.25]);
-                hold on;
-            end
-            yMean_light = sum(yFiltered_light_All,2)/nSweeps;
-            plot(xAxis,yMean_light,'Color',[0, 0, 0, 1]);
-            hold off;
-            ylabel(strcat(cell2mat(h.recChNames(lightCh)), " (", (cell2mat(h.recChUnits(lightCh))), ")"));
-            axis([xMinInSecNiceplot_VC xMaxInSecNiceplot_VC yMinNiceplot_light yMaxNiceplot_light])
-    
-        xlabel('Time (s)');
-        set(gcf,'Position',[1000 50 350 400]);
+% plot the 1st sweep of all the channels to compare filtered vs not
+% filtered data
+figure('name',strcat(fileName,'_filtered vs not'))
+for channel=1:nChannels
+    subplot(nChannels,1,channel)
+    plot(xAxis,d(:,channel,sweep),'Color','b');
+    hold on;
+    yFiltered = smooth(d(:,channel,sweep),smoothSpan);
+    plot(xAxis,yFiltered,'Color','r');
+    hold off;
+    ylabel(strcat(cell2mat(h.recChNames(channel)), " (", (cell2mat(h.recChUnits(channel))), ")"));
+    axis([xMinInSec xMaxInSec -inf inf])
 end
+xlabel('Time (s)');
 
+% niceplot
+figure('name',strcat(fileName,'_niceplot'))
+    subplot(3,1,1)
+    for sweep=1:nSweeps
+        yFiltered_main = smooth(d(:,mainDataCh,sweep),smoothSpan);
+        yFiltered_main_All(:,sweep) = yFiltered_main;
+        plot(xAxis,yFiltered_main,'Color',[0, 0, 0, 0.25]);
+        hold on;
+    end
+    yMean_main = sum(yFiltered_main_All,2)/nSweeps;
+    plot(xAxis,yMean_main,'Color',[0, 0, 0, 1]);
+    hold off;
+    ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+    axis([xMinInSecNiceplot xManInSecNiceplot yMinNiceplot_main yMaxNiceplot_main])
 
-% niceplot WC CC
-if strcmp(cell2mat(h.recChUnits(mainDataCh)),'mV')
-    figure('name',strcat(fileName,'_niceplot CC'))
-        
-        subplot(4,1,[1,2])
-            for sweep=1:nSweeps
-                yFiltered_main = smooth(d(:,mainDataCh,sweep),smoothSpan);
-                yFiltered_main_All(:,sweep) = yFiltered_main;
-                plot(xAxis,yFiltered_main,'Color',[0, 0, 0, 0.25]);
-                hold on;
-            end
-            yMean_main = sum(yFiltered_main_All,2)/nSweeps;
-            plot(xAxis,yMean_main,'Color',[0, 0, 0, 1]);
-            hold off;
-            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-            axis([xMinInSecNiceplot_CC xMaxInSecNiceplot_CC -100 50])
-            title([fileName '_niceplot'],'Interpreter','none');
-    
-        subplot(4,1,3)
-            for sweep=1:nSweeps
-                yFiltered_cmd = smooth(d(:,cmdCh,sweep),smoothSpan);
-                yFiltered_cmd_All(:,sweep) = yFiltered_cmd;
-                plot(xAxis,yFiltered_cmd,'Color',[0, 0, 0, 0.25]);
-                hold on;
-            end
-            yMean_cmd = sum(yFiltered_cmd_All,2)/nSweeps;
-            plot(xAxis,yMean_cmd,'Color',[0, 0, 0, 1]);
-            hold off;
-            ylabel(strcat(cell2mat(h.recChNames(cmdCh)), " (", (cell2mat(h.recChUnits(cmdCh))), ")"));
-            axis([xMinInSecNiceplot_CC xMaxInSecNiceplot_CC -200 200])
-    
-        subplot(4,1,4)
-            for sweep=1:nSweeps
-                yFiltered_light = smooth(d(:,lightCh,sweep),smoothSpan);
-                yFiltered_light_All(:,sweep) = yFiltered_light;
-                plot(xAxis,yFiltered_light,'Color',[0, 0, 0, 0.25]);
-                hold on;
-            end
-            yMean_light = sum(yFiltered_light_All,2)/nSweeps;
-            plot(xAxis,yMean_light,'Color',[0, 0, 0, 1]);
-            hold off;
-            ylabel(strcat(cell2mat(h.recChNames(lightCh)), " (", (cell2mat(h.recChUnits(lightCh))), ")"));
-            axis([xMinInSecNiceplot_CC xMaxInSecNiceplot_CC yMinNiceplot_light yMaxNiceplot_light])
-    
-        xlabel('Time (s)');
-        set(gcf,'Position',[0 50 350 400]);
+    subplot(3,1,2)
+    for sweep=1:nSweeps
+        yFiltered_cmd = smooth(d(:,cmdCh,sweep),smoothSpan);
+        yFiltered_cmd_All(:,sweep) = yFiltered_cmd;
+        plot(xAxis,yFiltered_cmd,'Color',[0, 0, 0, 0.25]);
+        hold on;
+    end
+    yMean_cmd = sum(yFiltered_cmd_All,2)/nSweeps;
+    plot(xAxis,yMean_cmd,'Color',[0, 0, 0, 1]);
+    hold off;
+    ylabel(strcat(cell2mat(h.recChNames(cmdCh)), " (", (cell2mat(h.recChUnits(cmdCh))), ")"));
+    axis([xMinInSecNiceplot xManInSecNiceplot yMinNiceplot_cmd yMaxNiceplot_cmd])
+
+    subplot(3,1,3)
+    for sweep=1:nSweeps
+        yFiltered_light = smooth(d(:,lightCh,sweep),smoothSpan);
+        yFiltered_light_All(:,sweep) = yFiltered_light;
+        plot(xAxis,yFiltered_light,'Color',[0, 0, 0, 0.25]);
+        hold on;
+    end
+    yMean_light = sum(yFiltered_light_All,2)/nSweeps;
+    plot(xAxis,yMean_light,'Color',[0, 0, 0, 1]);
+    hold off;
+    ylabel(strcat(cell2mat(h.recChNames(lightCh)), " (", (cell2mat(h.recChUnits(lightCh))), ")"));
+    axis([xMinInSecNiceplot xManInSecNiceplot yMinNiceplot_light yMaxNiceplot_light])
+
 end
+xlabel('Time (s)');
 
-
-if saveFigs == 1
-    saveAllFigs(saveDir)
-end
-
-
-
-    
 % 
 % %% FIND APs (if applicable)
 % 

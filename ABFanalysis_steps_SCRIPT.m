@@ -1,7 +1,7 @@
 
 %% USER INPUT
 
-fileDir = "M:\EphysData\20260114\2026_01_14_0048.abf";
+fileDir = "M:\EphysData\20260303\2026_03_03_0048.abf";
 smoothSpan = 5;
 xMinInSec = 0;
 xMaxInSec = 3;
