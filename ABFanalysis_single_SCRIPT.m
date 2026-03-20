@@ -51,6 +51,9 @@ plotAllCh = 1;
 % get file name
 fileName = fileDir(end-18:end-4);
 
+% get protocol used
+[~, protocol_name, ~] = fileparts(h.protocolName);
+
 % convert sampling interval into sampling frequency
 % si is the sampling interval in us
 % samplingFrequency is in Hz
@@ -230,13 +233,7 @@ if optogenetics == 1
 end
 
 
-if saveFigs == 1
-    saveAllFigs(saveDir)
-end
-
-
-
-if testPulse == 1
+if contains(protocol_name, "test pulse")
 
     % get the first data point with a significant drop in cmd voltage
     rsTestPulseOnsetDataPoint = find(diff(yMean_cmd)<-0.5, 1);
@@ -265,6 +262,16 @@ if testPulse == 1
     cellResistance = 1000 * dVoltage / dCurrentSteadyState;
 
 end
+
+
+
+if saveFigs == 1
+    saveAllFigs(saveDir)
+end
+
+
+
+
 
 
 

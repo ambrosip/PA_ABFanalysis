@@ -51,6 +51,9 @@ plotAllCh = 1;
 % get file name
 fileName = fileDir(end-18:end-4);
 
+% get protocol used
+[~, protocol_name, ~] = fileparts(h.protocolName);
+
 % convert sampling interval into sampling frequency
 % si is the sampling interval in us
 % samplingFrequency is in Hz
@@ -136,7 +139,11 @@ if strcmp(cell2mat(h.recChUnits(mainDataCh)),'pA')
             plot(xAxis,yMean_main,'Color',[0, 0, 0, 1]);
             hold off;
             ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-            axis([xMinInSecNiceplot_VC xMaxInSecNiceplot_VC yMinNiceplot_main yMaxNiceplot_main])
+            if size(yFiltered_main,1)/samplingFrequency >= xMaxInSecNiceplot_VC
+                axis([xMinInSecNiceplot_VC xMaxInSecNiceplot_VC yMinNiceplot_main yMaxNiceplot_main])
+            else
+                axis([xMinInSecNiceplot_VC inf yMinNiceplot_main yMaxNiceplot_main])
+            end
             title([fileName '_niceplot'],'Interpreter','none');
     
         subplot(4,1,3)
@@ -150,7 +157,11 @@ if strcmp(cell2mat(h.recChUnits(mainDataCh)),'pA')
             plot(xAxis,yMean_cmd,'Color',[0, 0, 0, 1]);
             hold off;
             ylabel(strcat(cell2mat(h.recChNames(cmdCh)), " (", (cell2mat(h.recChUnits(cmdCh))), ")"));
-            axis([xMinInSecNiceplot_VC xMaxInSecNiceplot_VC yMinNiceplot_cmd yMaxNiceplot_cmd])
+            if size(yFiltered_main,1)/samplingFrequency >= xMaxInSecNiceplot_VC
+                axis([xMinInSecNiceplot_VC xMaxInSecNiceplot_VC yMinNiceplot_cmd yMaxNiceplot_cmd])
+            else
+                axis([xMinInSecNiceplot_VC inf yMinNiceplot_cmd yMaxNiceplot_cmd])
+            end
 
         if optogenetics == 1    
             subplot(4,1,4)
@@ -222,13 +233,7 @@ if optogenetics == 1
 end
 
 
-if saveFigs == 1
-    saveAllFigs(saveDir)
-end
-
-
-
-if testPulse == 1
+if contains(protocol_name, "test pulse")
 
     % get the first data point with a significant drop in cmd voltage
     rsTestPulseOnsetDataPoint = find(diff(yMean_cmd)<-0.5, 1);
@@ -257,6 +262,16 @@ if testPulse == 1
     cellResistance = 1000 * dVoltage / dCurrentSteadyState;
 
 end
+
+
+
+if saveFigs == 1
+    saveAllFigs(saveDir)
+end
+
+
+
+
 
 
 
