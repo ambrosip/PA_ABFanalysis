@@ -3,12 +3,13 @@ close all
 
 %% USER INPUT
 
-fileDir = 'M:\EphysData\20260303\2026_03_03_0043.abf';  % use single quotes
-saveDir = 'M:\EphysData\20260303\Matlab';
+fileDir = 'M:\EphysData\20260318\2026_03_18_0005.abf';  % use single quotes
+saveDir = 'C:\Users\ambrosi\OHSU Dropbox\Priscilla Ambrosi\Dropbox - Moss Lab\Lab - Data summaries\2026-03-19 ephys dreadds';
 mainDataCh = 1;     % channel with recording from cell
 smoothSpan = 5;
 xMinInSec = 0;
 xMaxInSec = 1.75;
+testPulse = 1;     % 1 if this is a test pulse for looking at intrinsic properties and Rs; 0 if not
 
 % for APs
 minPeakHeight = -500;         % amplitude threshold
@@ -20,6 +21,7 @@ yMin = -1500;
 yMax = 1500;
 
 % for optogenetics
+optogenetics = 0;   % 1 if this is an optogenetics expt; 0 if not
 lightCh = 4;        % channel with opto stim. 3 is B. 4 is GR
 
 % for PSC
@@ -67,16 +69,18 @@ xAxis = linspace(0,sweepDurationInSeconds,h.sweepLengthInPts)';
 nSweeps = size(d,3);
 nChannels = size(h.recChNames,1);
 
-% find light stim info
-% rationale: I trigger the LED with a 5V digital pulse that is also
-% recorded by one of my analog inputs. I am looking for a big change in the
-% derivative of this channel.
-% ASSUMPTIONs: light stim is the same in all sweeps
-lightPulseStartInDataPts = find(diff(d(:,lightCh,1))>1);
-lightPulseStartInSecs = lightPulseStartInDataPts/samplingFrequency;
-lightPulseEndInDataPts = find(diff(d(:,lightCh,1))<-1);
-lightPulseEndInSecs = lightPulseEndInDataPts/samplingFrequency;
-lightPulseDurInSecs = lightPulseEndInSecs - lightPulseStartInSecs;
+if optogenetics == 1
+    % find light stim info
+    % rationale: I trigger the LED with a 5V digital pulse that is also
+    % recorded by one of my analog inputs. I am looking for a big change in the
+    % derivative of this channel.
+    % ASSUMPTIONs: light stim is the same in all sweeps
+    lightPulseStartInDataPts = find(diff(d(:,lightCh,1))>1);
+    lightPulseStartInSecs = lightPulseStartInDataPts/samplingFrequency;
+    lightPulseEndInDataPts = find(diff(d(:,lightCh,1))<-1);
+    lightPulseEndInSecs = lightPulseEndInDataPts/samplingFrequency;
+    lightPulseDurInSecs = lightPulseEndInSecs - lightPulseStartInSecs;
+end
 
 % create matrix that will be filled
 yFiltered_All=zeros(h.sweepLengthInPts,nSweeps);
@@ -132,7 +136,11 @@ if strcmp(cell2mat(h.recChUnits(mainDataCh)),'pA')
             plot(xAxis,yMean_main,'Color',[0, 0, 0, 1]);
             hold off;
             ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-            axis([xMinInSecNiceplot_VC xMaxInSecNiceplot_VC yMinNiceplot_main yMaxNiceplot_main])
+            if size(yFiltered_main,1)/samplingFrequency >= xMaxInSecNiceplot_VC
+                axis([xMinInSecNiceplot_VC xMaxInSecNiceplot_VC yMinNiceplot_main yMaxNiceplot_main])
+            else
+                axis([xMinInSecNiceplot_VC inf yMinNiceplot_main yMaxNiceplot_main])
+            end
             title([fileName '_niceplot'],'Interpreter','none');
     
         subplot(4,1,3)
@@ -146,77 +154,116 @@ if strcmp(cell2mat(h.recChUnits(mainDataCh)),'pA')
             plot(xAxis,yMean_cmd,'Color',[0, 0, 0, 1]);
             hold off;
             ylabel(strcat(cell2mat(h.recChNames(cmdCh)), " (", (cell2mat(h.recChUnits(cmdCh))), ")"));
-            axis([xMinInSecNiceplot_VC xMaxInSecNiceplot_VC yMinNiceplot_cmd yMaxNiceplot_cmd])
-    
-        subplot(4,1,4)
-            for sweep=1:nSweeps
-                yFiltered_light = smooth(d(:,lightCh,sweep),smoothSpan);
-                yFiltered_light_All(:,sweep) = yFiltered_light;
-                plot(xAxis,yFiltered_light,'Color',[0, 0, 0, 0.25]);
-                hold on;
+            if size(yFiltered_main,1)/samplingFrequency >= xMaxInSecNiceplot_VC
+                axis([xMinInSecNiceplot_VC xMaxInSecNiceplot_VC yMinNiceplot_cmd yMaxNiceplot_cmd])
+            else
+                axis([xMinInSecNiceplot_VC inf yMinNiceplot_cmd yMaxNiceplot_cmd])
             end
-            yMean_light = sum(yFiltered_light_All,2)/nSweeps;
-            plot(xAxis,yMean_light,'Color',[0, 0, 0, 1]);
-            hold off;
-            ylabel(strcat(cell2mat(h.recChNames(lightCh)), " (", (cell2mat(h.recChUnits(lightCh))), ")"));
-            axis([xMinInSecNiceplot_VC xMaxInSecNiceplot_VC yMinNiceplot_light yMaxNiceplot_light])
+
+        if optogenetics == 1    
+            subplot(4,1,4)
+                for sweep=1:nSweeps
+                    yFiltered_light = smooth(d(:,lightCh,sweep),smoothSpan);
+                    yFiltered_light_All(:,sweep) = yFiltered_light;
+                    plot(xAxis,yFiltered_light,'Color',[0, 0, 0, 0.25]);
+                    hold on;
+                end
+                yMean_light = sum(yFiltered_light_All,2)/nSweeps;
+                plot(xAxis,yMean_light,'Color',[0, 0, 0, 1]);
+                hold off;
+                ylabel(strcat(cell2mat(h.recChNames(lightCh)), " (", (cell2mat(h.recChUnits(lightCh))), ")"));
+                axis([xMinInSecNiceplot_VC xMaxInSecNiceplot_VC yMinNiceplot_light yMaxNiceplot_light])
+        end
     
         xlabel('Time (s)');
         set(gcf,'Position',[1000 50 350 400]);
 end
 
-
 % niceplot WC CC
-if strcmp(cell2mat(h.recChUnits(mainDataCh)),'mV')
-    figure('name',strcat(fileName,'_niceplot CC'))
+if optogenetics == 1
+    if strcmp(cell2mat(h.recChUnits(mainDataCh)),'mV')
+        figure('name',strcat(fileName,'_niceplot CC'))
+            
+            subplot(4,1,[1,2])
+                for sweep=1:nSweeps
+                    yFiltered_main = smooth(d(:,mainDataCh,sweep),smoothSpan);
+                    yFiltered_main_All(:,sweep) = yFiltered_main;
+                    plot(xAxis,yFiltered_main,'Color',[0, 0, 0, 0.25]);
+                    hold on;
+                end
+                yMean_main = sum(yFiltered_main_All,2)/nSweeps;
+                plot(xAxis,yMean_main,'Color',[0, 0, 0, 1]);
+                hold off;
+                ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
+                axis([xMinInSecNiceplot_CC xMaxInSecNiceplot_CC -100 50])
+                title([fileName '_niceplot'],'Interpreter','none');
         
-        subplot(4,1,[1,2])
-            for sweep=1:nSweeps
-                yFiltered_main = smooth(d(:,mainDataCh,sweep),smoothSpan);
-                yFiltered_main_All(:,sweep) = yFiltered_main;
-                plot(xAxis,yFiltered_main,'Color',[0, 0, 0, 0.25]);
-                hold on;
-            end
-            yMean_main = sum(yFiltered_main_All,2)/nSweeps;
-            plot(xAxis,yMean_main,'Color',[0, 0, 0, 1]);
-            hold off;
-            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-            axis([xMinInSecNiceplot_CC xMaxInSecNiceplot_CC -100 50])
-            title([fileName '_niceplot'],'Interpreter','none');
-    
-        subplot(4,1,3)
-            for sweep=1:nSweeps
-                yFiltered_cmd = smooth(d(:,cmdCh,sweep),smoothSpan);
-                yFiltered_cmd_All(:,sweep) = yFiltered_cmd;
-                plot(xAxis,yFiltered_cmd,'Color',[0, 0, 0, 0.25]);
-                hold on;
-            end
-            yMean_cmd = sum(yFiltered_cmd_All,2)/nSweeps;
-            plot(xAxis,yMean_cmd,'Color',[0, 0, 0, 1]);
-            hold off;
-            ylabel(strcat(cell2mat(h.recChNames(cmdCh)), " (", (cell2mat(h.recChUnits(cmdCh))), ")"));
-            axis([xMinInSecNiceplot_CC xMaxInSecNiceplot_CC -200 200])
-    
-        subplot(4,1,4)
-            for sweep=1:nSweeps
-                yFiltered_light = smooth(d(:,lightCh,sweep),smoothSpan);
-                yFiltered_light_All(:,sweep) = yFiltered_light;
-                plot(xAxis,yFiltered_light,'Color',[0, 0, 0, 0.25]);
-                hold on;
-            end
-            yMean_light = sum(yFiltered_light_All,2)/nSweeps;
-            plot(xAxis,yMean_light,'Color',[0, 0, 0, 1]);
-            hold off;
-            ylabel(strcat(cell2mat(h.recChNames(lightCh)), " (", (cell2mat(h.recChUnits(lightCh))), ")"));
-            axis([xMinInSecNiceplot_CC xMaxInSecNiceplot_CC yMinNiceplot_light yMaxNiceplot_light])
-    
-        xlabel('Time (s)');
-        set(gcf,'Position',[0 50 350 400]);
+            subplot(4,1,3)
+                for sweep=1:nSweeps
+                    yFiltered_cmd = smooth(d(:,cmdCh,sweep),smoothSpan);
+                    yFiltered_cmd_All(:,sweep) = yFiltered_cmd;
+                    plot(xAxis,yFiltered_cmd,'Color',[0, 0, 0, 0.25]);
+                    hold on;
+                end
+                yMean_cmd = sum(yFiltered_cmd_All,2)/nSweeps;
+                plot(xAxis,yMean_cmd,'Color',[0, 0, 0, 1]);
+                hold off;
+                ylabel(strcat(cell2mat(h.recChNames(cmdCh)), " (", (cell2mat(h.recChUnits(cmdCh))), ")"));
+                axis([xMinInSecNiceplot_CC xMaxInSecNiceplot_CC -200 200])
+        
+            subplot(4,1,4)
+                for sweep=1:nSweeps
+                    yFiltered_light = smooth(d(:,lightCh,sweep),smoothSpan);
+                    yFiltered_light_All(:,sweep) = yFiltered_light;
+                    plot(xAxis,yFiltered_light,'Color',[0, 0, 0, 0.25]);
+                    hold on;
+                end
+                yMean_light = sum(yFiltered_light_All,2)/nSweeps;
+                plot(xAxis,yMean_light,'Color',[0, 0, 0, 1]);
+                hold off;
+                ylabel(strcat(cell2mat(h.recChNames(lightCh)), " (", (cell2mat(h.recChUnits(lightCh))), ")"));
+                axis([xMinInSecNiceplot_CC xMaxInSecNiceplot_CC yMinNiceplot_light yMaxNiceplot_light])
+        
+            xlabel('Time (s)');
+            set(gcf,'Position',[0 50 350 400]);
+    end
 end
 
 
 if saveFigs == 1
     saveAllFigs(saveDir)
+end
+
+
+
+if testPulse == 1
+
+    % get the first data point with a significant drop in cmd voltage
+    rsTestPulseOnsetDataPoint = find(diff(yMean_cmd)<-0.5, 1);
+    rsTestPulseOnsetTime = rsTestPulseOnsetDataPoint/samplingFrequency;
+
+    % get the first data point with a significant rise in cmd voltage
+    rsTestPulseOffsetDataPoint = find(diff(yMean_cmd)>0.5, 1);
+    rsTestPulseOffsetTime = rsTestPulseOffsetDataPoint/samplingFrequency;
+
+    midPulseTime = rsTestPulseOnsetTime + (rsTestPulseOffsetTime - rsTestPulseOnsetTime)/2;
+    midPulseDataPoint = midPulseTime * samplingFrequency;
+
+    % get analysis intervals
+    rsBaselineDataPointInterval = ((rsTestPulseOnsetTime-0.05)*samplingFrequency):(rsTestPulseOnsetTime*samplingFrequency);
+    rsFirstTransientDataPointInterval = (rsTestPulseOnsetTime*samplingFrequency):(rsTestPulseOnsetTime+0.0025)*samplingFrequency;
+    rsPulseInterval = (rsTestPulseOnsetTime+0.0025)*samplingFrequency:(rsTestPulseOffsetTime-0.0025)*samplingFrequency;
+            
+    % calculating series resistance
+    rsBaselineCurrent = mean(yFiltered_main(rsBaselineDataPointInterval));  
+    rsTransientCurrent = min(yFiltered_main(rsFirstTransientDataPointInterval));
+    rsSteadyStateCurrent = mean(yFiltered_main(rsPulseInterval));
+    dCurrentTransient = rsTransientCurrent-rsBaselineCurrent;
+    dCurrentSteadyState = rsSteadyStateCurrent-rsBaselineCurrent;
+    dVoltage = mean(yMean_cmd(rsPulseInterval)) - mean(yMean_cmd(rsBaselineDataPointInterval));
+    seriesResistance = 1000 * dVoltage / dCurrentTransient; % mV/pA equals Gohm
+    cellResistance = 1000 * dVoltage / dCurrentSteadyState;
+
 end
 
 
