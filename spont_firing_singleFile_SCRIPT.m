@@ -4,35 +4,37 @@ close all;
 
 %% USER INPUT
 
-fileDir = 'M:\EphysData\20251212\2025_12_12_0028.abf';
-saveDir = "C:\Users\ambrosi\OHSU Dropbox\Priscilla Ambrosi\Dropbox - Moss Lab\Lab - Data summaries\2025-12-18 ephys dreadds";
+fileDir = 'M:\EphysData\20260318\2026_03_18_0013.abf';
+saveDir = "C:\Users\ambrosi\OHSU Dropbox\Priscilla Ambrosi\Dropbox - Moss Lab\Lab - Data summaries\2026-03-19 ephys dreadds";
 rec_type = "ON_VC_spont";
-cellAttached = 0;
+cellAttached = 1;
 
 mainDataCh = 1;             % channel with recording from cell
 cmdCh = 2;                  % channel with current command
-xMinInSec = 0;
-xMaxInSec = 20;
-yMin = -400;                % in pA or mV
-yMax = 100;                  % in pA or mV
+xMinInSec = 0;      % 0
+xMaxInSec = 5;     % 20
+yMin = -300;                % in pA or mV
+yMax = 300;                  % in pA or mV
 plot_cmd = 0;
 yMin_cmd = -100;            % in pA
 yMax_cmd = 250;             % in pA
 smoothSpan = 5;             % in data pts
 smooth_cellAttached = 1;
 bandpass_cellAttached = 1;
-highpassThreshold = 5;    % in Hz
-lowpassThreshold = 20000;    % in Hz
+% highpassThreshold = 5;    % in Hz
+% lowpassThreshold = 20000;    % in Hz
+highpassThreshold = 100;    % in Hz
+lowpassThreshold = 1500;    % in Hz
 minPeakHeight = 20;        % amplitude threshold
 minPeakDistance = 0.005;   % in seconds
-example_sweep = 1;
+example_sweep = 6;
 cmd_y_scaleBarSize = 25;    % in pA
 data_y_scaleBarSize = 10;   % in pA
 time_scaleBarSize = 1;      % in s
 
-saveFigs = 1;
+saveFigs = 0;
 saveData = 0;
-plot_QC = 0;
+plot_QC = 1;
 
 
 %% MAIN CODE
