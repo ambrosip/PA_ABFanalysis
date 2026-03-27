@@ -6,6 +6,8 @@ clear all
 % fileDir = 'M:\EphysData\20260303\2026_03_03_0006.abf';  % use single quotes
 fileDir = 'M:\EphysData\20260318\2026_03_18_0033.abf';  % use single quotes
 saveDir = 'C:\Users\ambrosi\OHSU Dropbox\Priscilla Ambrosi\Dropbox - Moss Lab\Lab - Data summaries\2026-03-19 ephys dreadds';
+
+% for all
 mainDataCh = 1;     % channel with recording from cell
 cmdCh = 2;          % channel with command voltage or current
 smoothSpan = 5;
@@ -45,8 +47,10 @@ yMaxNiceplot_light = 10;
 saveFigs = 0;
 plotAllCh = 1;
 
+fileparts(mfilename('fullpath'))
 
-%% MAIN CODE
+
+%% Collect data and metadata
 
 % load ABF file
 [d,si,h]=abfload(fileDir);
@@ -57,6 +61,13 @@ plotAllCh = 1;
 % get protocol used
 [~, protocol_name, ~] = fileparts(h.protocolName);
 
+% get first sweep number
+fileName_parts = split(fileName,"_");
+firstSweepNum = str2num(cell2mat(fileName_parts(end)));
+
+% get start time of recording in min from midnight
+firstSweepStartTime = h.uFileStartTimeMS/60/1000;
+
 % convert sampling interval into sampling frequency
 % si is the sampling interval in us
 % samplingFrequency is in Hz
@@ -66,6 +77,9 @@ samplingFrequency = 1000000/si;
 % 1st column: data points (time series)
 % 2nd column: channel
 % 3rd column: sweep #
+
+% relevant variables in h:
+% recTime: seconds from midnight
 
 % convert data points into seconds
 sweepDurationInSeconds = h.sweepLengthInPts/samplingFrequency;
@@ -94,6 +108,9 @@ yFiltered_main_All = yFiltered_All(:,mainDataCh,:);
 yFiltered_cmd_All = yFiltered_All(:,cmdCh,:);
 yMean_main = yMean(:,mainDataCh);
 yMean_cmd = yMean(:,cmdCh);
+
+
+%% Prep for plots
 
 % set y range
 % if recording unit is mV, use current clamp parameters
@@ -129,6 +146,9 @@ if size(xAxis,1)/samplingFrequency < xMax
     xMax = size(xAxis,1)/samplingFrequency;
 end
 
+
+%% Plot all channels
+
 % if applicable, plot all channels and sweeps
 if plotAllCh == 1
     % plot all the channels and sweeps
@@ -161,6 +181,9 @@ end
 %     axis([xMinInSec xMaxInSec -inf inf])
 % end
 % xlabel('Time (s)');
+
+
+%% Do protocol-specific analysis
 
 % if applicable, get optogenetics data 
 if contains(protocol_name, "LED")

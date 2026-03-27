@@ -1,0 +1,386 @@
+% createStructFromDatabase
+
+%% USER INPUT that is absolutely required
+
+% select data to be analyzed
+databaseFile = 'M:\EphysData\Ephys Database.xlsx';
+sheetName = 'TH Gq-DREADDs';
+saveDir = "C:\Users\ambrosi\OHSU Dropbox\Priscilla Ambrosi\Dropbox - Moss Lab\Lab - Data summaries\2026-03-26 ephys db test";
+firstRow = 49;          % set firstRow to be analyzed - remember to account for header when counting rows!
+analyzeOnlyOneRow = 1;  % 1 (yes) or 0 (no)
+saveFigs = 0;
+saveData = 0;
+plot_QC = 1;
+plotFigs = 1;
+ymaxhist = 50; % used by "getSpontFiringRate"
+
+
+%% USER INPUT that might be overwritten by database
+
+params.mainDataCh = 1;  % channel with recording from cell
+params.cmdCh = 2;       % channel with command voltage or current
+params.smoothSpan = 5;   % in data pts
+params.smooth_cellAttached = 1;
+params.bandpass_cellAttached = 1;
+
+% for AP detection in cell attached mode
+minPeakHeight_ON_VC = 20;         % amplitude threshold (pA)
+minPeakDistance_ON_VC = 0.001;      % in seconds
+highpassThreshold_ON_VC = 5;
+lowpassThreshold_ON_VC = 20000; 
+
+% for AP detection in whole cell current clamp move
+minPeakHeight_WC_CC = -20;        % amplitude threshold (mV)
+minPeakDistance_WC_CC = 0.001;    % in seconds
+highpassThreshold_WC_CC = 100;
+lowpassThreshold_WC_CC = 1500; 
+
+% niceplot x limits
+xMinInSecNiceplot_opto_VC = 0;
+xMaxInSecNiceplot_opto_VC = 2.5;
+xMinInSecNiceplot_opto_CC = 1.45;
+xMaxInSecNiceplot_opto_CC = 1.55;
+xMinInSecNiceplot_steps_CC = 0;
+xMaxInSecNiceplot_steps_CC = 3;
+xMinInSecNiceplot_spont_CC = 5;
+xMaxInSecNiceplot_spont_CC = 5;
+xMinInSecNiceplot_ON = 0;
+xMaxInSecNiceplot_ON = 5;
+
+% niceplot y limits (in pA or mV)
+yMin_main_ON_VC = -1500;
+yMax_main_ON_VC = 1500;
+yMin_cmd_ON_VC = -200;
+yMax_cmd_ON_VC = 200;
+yMinNiceplot_main_VC = -500;
+yMaxNiceplot_main_VC = 500;
+yMinNiceplot_main_CC = -100;
+yMaxNiceplot_main_CC = 50;
+yMinNiceplot_cmd_VC = -70;
+yMaxNiceplot_cmd_VC = -55;
+yMinNiceplot_cmd_CC = 300;
+yMaxNiceplot_cmd_CC = -200;
+yMinNiceplot_light = -5;
+yMaxNiceplot_light = 10;
+
+% example sweeps
+example_sweep_steps = 5;
+example_sweep_spont = 1;
+example_sweep_opto = 1;
+
+% scale bars
+cmd_y_scaleBarSize_WC_CC = 25;    
+data_y_scaleBarSize_WC_CC = 10;   
+time_scaleBarSize_WC_CC = 0.25;      % in s
+cmd_y_scaleBarSize_WC_VC = 25;    
+data_y_scaleBarSize_WC_VC = 100;   
+time_scaleBarSize_WC_VC = 0.25;      % in s
+
+
+%% GATHER DATA FROM DATABASE
+
+% save importing options so we can change them
+opts = detectImportOptions(databaseFile, 'Sheet', sheetName);
+
+% change the variable type in column 4 (file_num) to char so that matlab
+% will actially read all the values in each cell. Why? Each cell is column
+% 4 can contain multiple numbers, separated by a comma. If you let matlab
+% do its auto variable type detection, it will interpret column 4 cells as
+% doubles and will import cells with multiple numbers as "NaN".
+% ALERT: change the column number if you add/remove database columns
+opts.VariableTypes(4) = {'char'};
+
+% read database file using custom options
+database = readtable(databaseFile, opts);
+
+% each row is one type of recording
+% one cell can be represented by multiple rows
+rows = height(database);
+
+% if user only wants to analye 1 row, overwrite the variable "rows"
+if analyzeOnlyOneRow == 1
+    rows = firstRow;
+end
+
+% get path of database file to figure out path of raw data files
+[filepath,name,ext]=fileparts(databaseFile);
+
+
+%% PROCESS DATA FROM DATABASE
+
+% get analysis date
+analysisDate =  datestr(datetime('today'),'yyyy-mm-dd');
+
+% iterate through every row
+for row=firstRow:rows
+
+    % ASSUMPTION: rec_type is written in the format "ON_CC_spont"
+    rec_type = cell2mat(database.rec_type(row));
+    recordingType = rec_type;
+
+    % only look into cells that were NOT exluded
+    if cell2mat(database.analyze(row)) == "y"
+            
+        % collect basic info from database
+        mouseNumber = database.m(row);
+        % pad mouse number with zeros (if needed) to get 4 digits
+        mouseName = sprintf('m%04d',mouseNumber);  
+        % keep collecting info
+        dateRecorded = database.date_recorded(row);
+        cellName = cell2mat(database.cell(row));
+        if contains(sheetName,"DREADD")
+            dreadds_Expression = cell2mat(database.dreadds_pos(row));
+            dreadds_Type = cell2mat(database.dreadds_type(row));
+            if dreadds_Expression == 'n'
+                dreaddsExpression = "DREADDS-NEG";
+            elseif dreadds_Type == "Gq"
+                dreaddsExpression = "DREADDS-Gq-POS";
+            elseif dreadds_Type == "Gi"
+                dreaddsExpression = "DREADDS-Gi-POS";
+            end        
+            dreadds_active = cell2mat(database.dreadds_active(row));
+        else
+            dreadds_Expression = "na";
+            dreadds_Type = "na";
+            dreadds_active = "na";
+        end
+
+        % collect basename of files in directory
+        % abfFilesDir = cell2mat(database.dir(row));
+        abfFilesDir = fullfile(filepath,num2str(dateRecorded));
+        abfFiles = dir(fullfile(abfFilesDir, '*.abf'));
+        abfFilesPrefix = abfFiles(1).name(1:end-8);
+
+        % collect file numbers to analyze
+        fileNumbers = sort(str2double(split(database.file_num(row),',')),'ascend');
+
+        % iterate through all the file numbers listed for this experiment
+        % type
+        for file=fileNumbers'
+
+            % this is the name of the file that will be analyzed
+            abfFileName = strcat(abfFilesPrefix, sprintf('%04d.abf',file));
+
+            % make complete file name prefix for exporting data
+            str = [mouseName, cellName, dreaddsExpression, recordingType, abfFileName];
+            prefix = join(str,'_');
+
+            % this is the full path to the file that will be analyzed
+            fileDir = fullfile(abfFilesDir,abfFileName);
+
+            % Collect data and metadata
+            % load ABF file
+            [d,si,h]=abfload(fileDir);
+            
+            % get file name
+            [~, fileName, ~] = fileparts(fileDir);
+            
+            % get protocol used
+            [~, protocol_name, ~] = fileparts(h.protocolName);
+            
+            % get first sweep number
+            fileName_parts = split(fileName,"_");
+            firstSweepNum = str2num(cell2mat(fileName_parts(end)));
+
+            % get start time of recording in min from midnight
+            firstSweepStartTime = h.uFileStartTimeMS/60/1000;
+            
+            % convert sampling interval into sampling frequency
+            % si is the sampling interval in us
+            % samplingFrequency is in Hz
+            samplingFrequency = 1000000/si;
+            
+            % d is organized like this:
+            % 1st column: data points (time series)
+            % 2nd column: channel
+            % 3rd column: sweep #
+            
+            % relevant variables in h:
+            % recTime: seconds from midnight
+            
+            % convert data points into seconds
+            sweepDurationInSeconds = h.sweepLengthInPts/samplingFrequency;
+            xAxis = linspace(0,sweepDurationInSeconds,h.sweepLengthInPts)';
+            
+            % collect some simple info from header
+            nSweeps = size(d,3);
+            nChannels = size(h.recChNames,1);          
+
+            % set params
+            % set y range
+            % if recording unit is mV, use current clamp parameters
+            if strcmp(cell2mat(h.recChUnits(params.mainDataCh)),'mV')
+                params.yMin = yMinNiceplot_main_CC;
+                params.yMax = yMaxNiceplot_main_CC;
+                params.yMin_cmd = yMinNiceplot_cmd_CC;
+                params.yMax_cmd = yMaxNiceplot_cmd_CC;
+                params.cmd_y_scaleBarSize = cmd_y_scaleBarSize_WC_CC;
+                params.data_y_scaleBarSize = data_y_scaleBarSize_WC_CC;
+                cellAttached = 0; % ASSUMPTION: all cell attached recordings are in voltage clamp
+                params.highpassThreshold = highpassThreshold_WC_CC;
+                params.lowpassThreshold = lowpassThreshold_WC_CC;
+                params.minPeakHeight = minPeakHeight_WC_CC;
+                params.minPeakDistance = minPeakDistance_WC_CC;
+
+                if contains(protocol_name, "LED")
+                    params.plot_cmd = 0;
+                    params.example_sweep = example_sweep_opto;
+                    params.xMinInSec = xMinInSecNiceplot_opto_CC;
+                    params.xMaxInSec = xMaxInSecNiceplot_opto_CC;                    
+
+                elseif contains(protocol_name, "step")
+                    params.plot_cmd = 1;
+                    params.example_sweep = example_sweep_steps;
+                    params.xMinInSec = xMinInSecNiceplot_steps_CC;
+                    params.xMaxInSec = xMaxInSecNiceplot_steps_CC;
+
+                elseif contains(protocol_name, "rheo")
+                    params.plot_cmd = 1;
+                    params.example_sweep = example_sweep_steps;
+                    params.xMinInSec = xMinInSecNiceplot_steps_CC;
+                    params.xMaxInSec = xMaxInSecNiceplot_steps_CC;
+
+                elseif contains(protocol_name, "spont")
+                    params.plot_cmd = 0;
+                    params.example_sweep = example_sweep_spont;
+                    params.xMinInSec = xMinInSecNiceplot_spont_CC;
+                    params.xMaxInSec = xMaxInSecNiceplot_spont_CC;
+
+                end
+
+                params.time_scaleBarSize = (params.xMaxInSec - params.xMinInSec)/10;
+
+            % if recording unit is pA, use voltage clamp parameters
+            else
+                params.yMin = yMinNiceplot_main_VC;
+                params.yMax = yMaxNiceplot_main_VC;
+                params.yMin_cmd = yMinNiceplot_cmd_VC;
+                params.yMax_cmd = yMaxNiceplot_cmd_VC;
+                params.cmd_y_scaleBarSize = cmd_y_scaleBarSize_WC_VC;
+                params.data_y_scaleBarSize = data_y_scaleBarSize_WC_VC;
+                params.time_scaleBarSize = time_scaleBarSize_WC_VC; % might be irrelevant
+                cellAttached = 0;
+
+                if contains(protocol_name, "spont")
+                    params.plot_cmd = 0;
+                    cellAttached = 1; % ASSUMPTION: spont firing recordings in voltage clamp are cell attached recordings
+                    params.example_sweep = example_sweep_spont;
+                    params.xMinInSec = xMinInSecNiceplot_ON;
+                    params.xMaxInSec = xMaxInSecNiceplot_ON;
+                    params.yMin = yMin_main_ON_VC;
+                    params.yMax = yMax_main_ON_VC;
+                    params.yMin_cmd = yMin_cmd_ON_VC;
+                    params.yMax_cmd = yMax_cmd_ON_VC;
+                    params.cmd_y_scaleBarSize = cmd_y_scaleBarSize_WC_ON;
+                    params.data_y_scaleBarSize = data_y_scaleBarSize_WC_ON;
+                    params.time_scaleBarSize = (params.xMaxInSec - params.xMinInSec)/10;
+                    params.highpassThreshold = highpassThreshold_ON_VC;
+                    params.lowpassThreshold = lowpassThreshold_ON_VC;
+                    params.minPeakHeight = minPeakHeight_ON_VC;
+                    params.minPeakDistance = minPeakDistance_ON_VC;
+                end
+            end
+            
+            if size(xAxis,1)/samplingFrequency < params.xMaxInSec
+                params.xMaxInSec = size(xAxis,1)/samplingFrequency;
+            end
+
+            % overwrite default parameters with values from database
+            for i = 1:numel(database.Properties.VariableNames)
+                varName = database.Properties.VariableNames{i};
+                val = database.(varName)(row);
+            
+                % 1. Extract from cell if the table stored it as a cell array
+                if iscell(val)
+                    val = val{1};
+                end
+            
+                % 2. Check if the value is "missing" (NaN, empty string, etc.)
+                if ~ismissing(val)
+                    params.(varName) = val;
+                end
+            end
+
+            % % overwrite default parameters with values from database
+            % for varName = database.Properties.VariableNames
+            %     varName = cell2mat(varName);
+            %     if ~isnan(database.(varName)(row))
+            %         params.(varName) = database.(varName)(row);
+            %     end
+            % end
+
+
+            % create matrix that will be filled
+            yFiltered_All=zeros(h.sweepLengthInPts,nChannels,nSweeps);
+            
+            % filter all data
+            for channel=1:nChannels
+                for sweep=1:nSweeps
+                    if cellAttached == 0
+                        yFiltered = smooth(d(:,channel,sweep),params.smoothSpan);
+                    else
+                        if params.smooth_cellAttached == 1 && params.bandpass_cellAttached == 1
+                            yFiltered = smooth(d(:,channel,sweep),params.smoothSpan);
+                            yFiltered = bandpass(yFiltered,[params.highpassThreshold params.lowpassThreshold],samplingFrequency);
+                        elseif params.smooth_cellAttached == 0 && params.bandpass_cellAttached == 1
+                            yFiltered = bandpass(d(:,channel,sweep),[params.highpassThreshold params.lowpassThreshold],samplingFrequency);
+                        elseif params.smooth_cellAttached == 1 && params.bandpass_cellAttached == 0
+                            yFiltered = smooth(d(:,channel,sweep),params.smoothSpan);
+                        end
+                    end
+                    yFiltered_All(:,channel,sweep) = yFiltered;
+                end
+            end
+            
+            % calculate mean for all channels
+            yMean = mean(yFiltered_All,3);
+            
+            % set main and cmd signal 
+            yFiltered_main_All = yFiltered_All(:,params.mainDataCh,:);
+            yFiltered_cmd_All = yFiltered_All(:,params.cmdCh,:);
+            yMean_main = yMean(:,params.mainDataCh);
+            yMean_cmd = yMean(:,params.cmdCh);
+
+            if file == fileNumbers(1)
+                absoluteStartTime = firstSweepStartTime;
+                relativeStartTime = 0;
+            else
+                relativeStartTime = firstSweepStartTime - absoluteStartTime;
+            end
+
+            % if applicable, get optogenetics data 
+            if contains(protocol_name, "LED")
+                getOptogeneticsData;
+                if strcmp(cell2mat(h.recChUnits(params.mainDataCh)),'pA')
+                    getSeriesResistance;
+                    disp('got series resistance')
+                    seriesResistance_thisFile = [firstSweepNum, relativeStartTime, seriesResistance]; % STOPPED EDITING HERE
+                    disp('stored series resistance info into s_ephys')
+                end
+                disp('got optogenetic data')
+            end
+            
+            % if applicable, get series resistance
+            if contains(protocol_name, "test pulse") &...
+                    strcmp(cell2mat(h.recChUnits(params.mainDataCh)),'pA')
+                getSeriesResistance;
+                disp('got series resistance')
+                seriesResistance_thisFile = [firstSweepNum, relativeStartTime, seriesResistance];
+                disp('stored series resistance info into s_ephys')
+            end
+
+            % if applicable, get spont firing data
+            if contains(protocol_name, "spont")
+                getSpontFiringData;
+                disp('got spont firing data')
+                s_ephys.(dateRecorded).(mouseName).(cellName).spontFiring =...
+                    [s_ephys.(dateRecorded).(mouseName).(cellName).spontFiring;...
+                    firstSweepNum,relativeStartTime,firingRateMean,firingRateStd];                   
+            end
+        end
+    end
+
+    if saveFigs == 1
+        saveAllFigs(saveDir)       
+    end
+end
