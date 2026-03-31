@@ -178,14 +178,26 @@ if plotFigs == 1
         hold on;                    
         histogram('BinEdges', params.xMinInSec:params.xMaxInSec, 'BinCounts', firingHz, 'DisplayStyle', 'stairs', 'EdgeColor', 'k');                           
         % plot Hz mean as horizontal line
-        yline(firingRateMeanBySweep(1,1), '--');
+        % yline(firingRateMeanBySweep(1,1), '--'); % IDK why this was set like this. changed to firingRateMean on 3/30/26
+        yline(firingRateMean, '--');
         % plot +- 2 SD as rectangle around mean - ALERT: need to check the math here
         % [x y width height]
-        rectangle('Position', [0 firingRateMeanBySweep(1,1)-(2*firingRateStd) params.xMaxInSec 4*firingRateStd], 'FaceAlpha', 0.1, 'FaceColor', [0 0 0], 'EdgeColor', 'none');
+        rectangle('Position', [0 firingRateMean-(2*firingRateStd) params.xMaxInSec 4*firingRateStd], 'FaceAlpha', 0.1, 'FaceColor', [0 0 0], 'EdgeColor', 'none');
         xlabel('Time (s)');
         ylabel('Firing rate (Hz)');
         axis([params.xMinInSec params.xMaxInSec 0 ymaxhist])
         yticks([0 ymaxhist]);
         hold off;
         title(prefix,'Interpreter','none');
+end
+
+if build_structure == 1
+    if ~isfield(s_ephys.(dateRecorded_fieldName).(mouseName).(cellName), 'spontFiring')
+        s_ephys.(dateRecorded_fieldName).(mouseName).(cellName).spontFiring =...
+            [firstSweepNum,relativeStartTime,firingRateMean,firingRateStd];
+    else
+        s_ephys.(dateRecorded_fieldName).(mouseName).(cellName).spontFiring =...
+            [s_ephys.(dateRecorded_fieldName).(mouseName).(cellName).spontFiring;...
+            firstSweepNum,relativeStartTime,firingRateMean,firingRateStd];
+    end
 end

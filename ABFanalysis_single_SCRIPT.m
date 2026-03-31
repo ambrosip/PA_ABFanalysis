@@ -46,8 +46,7 @@ yMaxNiceplot_light = 10;
 
 saveFigs = 0;
 plotAllCh = 1;
-
-fileparts(mfilename('fullpath'))
+build_structure = 0;
 
 
 %% Collect data and metadata

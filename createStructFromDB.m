@@ -6,13 +6,14 @@
 databaseFile = 'M:\EphysData\Ephys Database.xlsx';
 sheetName = 'TH Gq-DREADDs';
 saveDir = "C:\Users\ambrosi\OHSU Dropbox\Priscilla Ambrosi\Dropbox - Moss Lab\Lab - Data summaries\2026-03-26 ephys db test";
-firstRow = 49;          % set firstRow to be analyzed - remember to account for header when counting rows!
-analyzeOnlyOneRow = 1;  % 1 (yes) or 0 (no)
-saveFigs = 0;
+firstRow = 1;          % set firstRow to be analyzed - remember to account for header when counting rows!
+analyzeOnlyOneRow = 0;  % 1 (yes) or 0 (no)
+saveFigs = 1;
 saveData = 0;
 plot_QC = 1;
 plotFigs = 1;
-ymaxhist = 50; % used by "getSpontFiringRate"
+ymaxhist = 20;          % used by "getSpontFiringRate"
+build_structure = 1;
 
 
 %% USER INPUT that might be overwritten by database
@@ -42,7 +43,7 @@ xMinInSecNiceplot_opto_CC = 1.45;
 xMaxInSecNiceplot_opto_CC = 1.55;
 xMinInSecNiceplot_steps_CC = 0;
 xMaxInSecNiceplot_steps_CC = 3;
-xMinInSecNiceplot_spont_CC = 5;
+xMinInSecNiceplot_spont_CC = 0;
 xMaxInSecNiceplot_spont_CC = 5;
 xMinInSecNiceplot_ON = 0;
 xMaxInSecNiceplot_ON = 5;
@@ -70,11 +71,13 @@ example_sweep_opto = 1;
 
 % scale bars
 cmd_y_scaleBarSize_WC_CC = 25;    
-data_y_scaleBarSize_WC_CC = 10;   
+data_y_scaleBarSize_WC_CC = 20;   
 time_scaleBarSize_WC_CC = 0.25;      % in s
 cmd_y_scaleBarSize_WC_VC = 25;    
 data_y_scaleBarSize_WC_VC = 100;   
 time_scaleBarSize_WC_VC = 0.25;      % in s
+cmd_y_scaleBarSize_WC_ON = 25;
+data_y_scaleBarSize_WC_ON = 50;
 
 
 %% GATHER DATA FROM DATABASE
@@ -111,6 +114,17 @@ end
 % get analysis date
 analysisDate =  datestr(datetime('today'),'yyyy-mm-dd');
 
+% create basic structure 
+for date = unique(database.date_recorded)'
+    dateRecorded_fieldName = strcat('d', num2str(date));
+    for mouseNumber = unique(database(database.date_recorded == date,:).m)'    
+        mouseName = sprintf('m%04d',mouseNumber); 
+        for cell = unique(convertCharsToStrings(database(database.m == mouseNumber,:).cell))'
+            s_ephys.(dateRecorded_fieldName).(mouseName).(cell) = [];
+        end
+    end
+end
+
 % iterate through every row
 for row=firstRow:rows
 
@@ -125,8 +139,9 @@ for row=firstRow:rows
         mouseNumber = database.m(row);
         % pad mouse number with zeros (if needed) to get 4 digits
         mouseName = sprintf('m%04d',mouseNumber);  
-        % keep collecting info
+        % keep collecting info      
         dateRecorded = database.date_recorded(row);
+        dateRecorded_fieldName = strcat('d', num2str(dateRecorded));
         cellName = cell2mat(database.cell(row));
         if contains(sheetName,"DREADD")
             dreadds_Expression = cell2mat(database.dreadds_pos(row));
@@ -143,7 +158,7 @@ for row=firstRow:rows
             dreadds_Expression = "na";
             dreadds_Type = "na";
             dreadds_active = "na";
-        end
+        end         
 
         % collect basename of files in directory
         % abfFilesDir = cell2mat(database.dir(row));
@@ -183,6 +198,10 @@ for row=firstRow:rows
             firstSweepNum = str2num(cell2mat(fileName_parts(end)));
 
             % get start time of recording in min from midnight
+            % ALERT TO DO: save this time instead of the relative time in
+            % the structure. Why? The way I'm doing rn fails to calculate
+            % the relative time elapsed if I don't group the file numbers
+            % in the same cell
             firstSweepStartTime = h.uFileStartTimeMS/60/1000;
             
             % convert sampling interval into sampling frequency
@@ -246,12 +265,19 @@ for row=firstRow:rows
                     params.xMinInSec = xMinInSecNiceplot_spont_CC;
                     params.xMaxInSec = xMaxInSecNiceplot_spont_CC;
 
+                elseif contains(protocol_name, "pA") % ASSUMPTION
+                    params.plot_cmd = 1;
+                    params.example_sweep = example_sweep_steps;
+                    params.xMinInSec = xMinInSecNiceplot_steps_CC;
+                    params.xMaxInSec = xMaxInSecNiceplot_steps_CC;
                 end
 
                 params.time_scaleBarSize = (params.xMaxInSec - params.xMinInSec)/10;
 
             % if recording unit is pA, use voltage clamp parameters
             else
+                params.xMinInSec = xMinInSecNiceplot_spont_CC;
+                params.xMaxInSec = xMaxInSecNiceplot_spont_CC;
                 params.yMin = yMinNiceplot_main_VC;
                 params.yMax = yMaxNiceplot_main_VC;
                 params.yMin_cmd = yMinNiceplot_cmd_VC;
@@ -309,7 +335,6 @@ for row=firstRow:rows
             %     end
             % end
 
-
             % create matrix that will be filled
             yFiltered_All=zeros(h.sweepLengthInPts,nChannels,nSweeps);
             
@@ -341,6 +366,7 @@ for row=firstRow:rows
             yMean_main = yMean(:,params.mainDataCh);
             yMean_cmd = yMean(:,params.cmdCh);
 
+            % get relative recording time in minutes
             if file == fileNumbers(1)
                 absoluteStartTime = firstSweepStartTime;
                 relativeStartTime = 0;
@@ -350,37 +376,38 @@ for row=firstRow:rows
 
             % if applicable, get optogenetics data 
             if contains(protocol_name, "LED")
-                getOptogeneticsData;
+                getOptogeneticsData; % ALERT NEED TO ADD STRUCTURE BUILDING
+                disp('got optogenetic data')
                 if strcmp(cell2mat(h.recChUnits(params.mainDataCh)),'pA')
                     getSeriesResistance;
                     disp('got series resistance')
-                    seriesResistance_thisFile = [firstSweepNum, relativeStartTime, seriesResistance]; % STOPPED EDITING HERE
-                    disp('stored series resistance info into s_ephys')
-                end
-                disp('got optogenetic data')
+                end               
             end
             
             % if applicable, get series resistance
-            if contains(protocol_name, "test pulse") &...
-                    strcmp(cell2mat(h.recChUnits(params.mainDataCh)),'pA')
+            if contains(protocol_name, "test pulse") & strcmp(cell2mat(h.recChUnits(params.mainDataCh)),'pA')
                 getSeriesResistance;
                 disp('got series resistance')
-                seriesResistance_thisFile = [firstSweepNum, relativeStartTime, seriesResistance];
-                disp('stored series resistance info into s_ephys')
             end
 
             % if applicable, get spont firing data
             if contains(protocol_name, "spont")
                 getSpontFiringData;
-                disp('got spont firing data')
-                s_ephys.(dateRecorded).(mouseName).(cellName).spontFiring =...
-                    [s_ephys.(dateRecorded).(mouseName).(cellName).spontFiring;...
-                    firstSweepNum,relativeStartTime,firingRateMean,firingRateStd];                   
+                disp('got spont firing data')                                
             end
         end
     end
 
     if saveFigs == 1
-        saveAllFigs(saveDir)       
+        saveAllFigs(saveDir) 
+        close all
     end
 end
+
+
+%% Save workspace
+
+% save workspace variables
+matFileName = strcat(analysisDate, '_ephys_db');
+save(fullfile(saveDir,matFileName));     
+disp('I saved the mat file')

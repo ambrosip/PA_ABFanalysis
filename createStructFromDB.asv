@@ -12,7 +12,8 @@ saveFigs = 0;
 saveData = 0;
 plot_QC = 1;
 plotFigs = 1;
-ymaxhist = 50; % used by "getSpontFiringRate"
+ymaxhist = 50;          % used by "getSpontFiringRate"
+build_structure = 1;
 
 
 %% USER INPUT that might be overwritten by database
@@ -111,6 +112,8 @@ end
 % get analysis date
 analysisDate =  datestr(datetime('today'),'yyyy-mm-dd');
 
+
+
 % iterate through every row
 for row=firstRow:rows
 
@@ -125,8 +128,9 @@ for row=firstRow:rows
         mouseNumber = database.m(row);
         % pad mouse number with zeros (if needed) to get 4 digits
         mouseName = sprintf('m%04d',mouseNumber);  
-        % keep collecting info
+        % keep collecting info      
         dateRecorded = database.date_recorded(row);
+        dateRecorded_fieldName = strcat('d', num2str(dateRecorded));
         cellName = cell2mat(database.cell(row));
         if contains(sheetName,"DREADD")
             dreadds_Expression = cell2mat(database.dreadds_pos(row));
@@ -145,6 +149,10 @@ for row=firstRow:rows
             dreadds_active = "na";
         end
 
+        if ~exist(strcat('s_ephys.',dateRecorded_fieldName,'.',mouseName,'.',cellName),'var')
+            s_ephys.(dateRecorded_fieldName).(mouseName).(cellName) = [];
+        end            
+
         % collect basename of files in directory
         % abfFilesDir = cell2mat(database.dir(row));
         abfFilesDir = fullfile(filepath,num2str(dateRecorded));
@@ -153,6 +161,10 @@ for row=firstRow:rows
 
         % collect file numbers to analyze
         fileNumbers = sort(str2double(split(database.file_num(row),',')),'ascend');
+
+        % create empty matrices that will be filled
+        seriesResistance_thisFile = [];
+        seriesResistance_thisCell = [];
 
         % iterate through all the file numbers listed for this experiment
         % type
@@ -309,7 +321,6 @@ for row=firstRow:rows
             %     end
             % end
 
-
             % create matrix that will be filled
             yFiltered_All=zeros(h.sweepLengthInPts,nChannels,nSweeps);
             
@@ -350,32 +361,24 @@ for row=firstRow:rows
 
             % if applicable, get optogenetics data 
             if contains(protocol_name, "LED")
-                getOptogeneticsData;
+                getOptogeneticsData; % ALERT NEED TO ADD STRUCTURE BUILDING
+                disp('got optogenetic data')
                 if strcmp(cell2mat(h.recChUnits(params.mainDataCh)),'pA')
                     getSeriesResistance;
                     disp('got series resistance')
-                    seriesResistance_thisFile = [firstSweepNum, relativeStartTime, seriesResistance];
-                    disp('stored series resistance info into s_ephys')
-                end
-                disp('got optogenetic data')
+                end               
             end
             
             % if applicable, get series resistance
-            if contains(protocol_name, "test pulse") &...
-                    strcmp(cell2mat(h.recChUnits(params.mainDataCh)),'pA')
+            if contains(protocol_name, "test pulse") & strcmp(cell2mat(h.recChUnits(params.mainDataCh)),'pA')
                 getSeriesResistance;
                 disp('got series resistance')
-                seriesResistance_thisFile = [firstSweepNum, relativeStartTime, seriesResistance];
-                disp('stored series resistance info into s_ephys')
             end
 
             % if applicable, get spont firing data
             if contains(protocol_name, "spont")
                 getSpontFiringData;
-                disp('got spont firing data')
-                s_ephys.(dateRecorded).(mouseName).(cellName).spontFiring =...
-                    [s_ephys.(dateRecorded).(mouseName).(cellName).spontFiring;...
-                    firstSweepNum,relativeStartTime,firingRateMean,firingRateStd];                   
+                disp('got spont firing data')                                
             end
         end
     end

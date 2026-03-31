@@ -62,3 +62,12 @@ else
         set(gcf,'Position',[1000 50 350 400]);
     end
 end
+
+if build_structure == 1
+    seriesResistance_thisFile = [firstSweepNum, relativeStartTime, seriesResistance]; % STOPPED EDITING HERE
+    if ~isfield(s_ephys.(dateRecorded).(mouseName).(cellName), seriesResistance)
+        s_ephys.(dateRecorded).(mouseName).(cellName).seriesResistance = seriesResistance_thisFile;
+    else
+        s_ephys.(dateRecorded).(mouseName).(cellName).seriesResistance = [...
+            ]
+end

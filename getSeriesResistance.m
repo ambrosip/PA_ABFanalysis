@@ -36,29 +36,41 @@ else
     cellResistance = 1000 * dVoltage / dCurrentSteadyState;
     
     % niceplot WC VC
-    if strcmp(cell2mat(h.recChUnits(mainDataCh)),'pA')
+    if strcmp(cell2mat(h.recChUnits(params.mainDataCh)),'pA')
         figure('name',strcat(fileName,'_test pulse'))   
         subplot(3,1,[1,2])
             for sweep=1:nSweeps
-                plot(xAxis,yFiltered_All(:,mainDataCh,sweep),'Color',[0, 0, 0, 0.25]);
+                plot(xAxis,yFiltered_All(:,params.mainDataCh,sweep),'Color',[0, 0, 0, 0.25]);
                 hold on;
             end
             plot(xAxis,yMean_main,'Color',[0, 0, 0, 1]);
             hold off;
-            ylabel(strcat(cell2mat(h.recChNames(mainDataCh)), " (", (cell2mat(h.recChUnits(mainDataCh))), ")"));
-            axis([rsTestPulseOnsetTime-0.05 rsTestPulseOffsetTime+0.05 yMin_main yMax_main])
+            ylabel(strcat(cell2mat(h.recChNames(params.mainDataCh)), " (", (cell2mat(h.recChUnits(params.mainDataCh))), ")"));
+            axis([rsTestPulseOnsetTime-0.05 rsTestPulseOffsetTime+0.05 params.yMin params.yMax])
             title([fileName '_test pulse'],'Interpreter','none');
     
         subplot(3,1,3)
             for sweep=1:nSweeps
-                plot(xAxis,yFiltered_All(:,cmdCh,sweep),'Color',[0, 0, 0, 0.25]);
+                plot(xAxis,yFiltered_All(:,params.cmdCh,sweep),'Color',[0, 0, 0, 0.25]);
                 hold on;
             end
             plot(xAxis,yMean_cmd,'Color',[0, 0, 0, 1]);
             hold off;
-            ylabel(strcat(cell2mat(h.recChNames(cmdCh)), " (", (cell2mat(h.recChUnits(cmdCh))), ")"));
-            axis([rsTestPulseOnsetTime-0.05 rsTestPulseOffsetTime+0.05 yMin_cmd yMax_cmd])   
+            ylabel(strcat(cell2mat(h.recChNames(params.cmdCh)), " (", (cell2mat(h.recChUnits(params.cmdCh))), ")"));
+            axis([rsTestPulseOnsetTime-0.05 rsTestPulseOffsetTime+0.05 params.yMin_cmd params.yMax_cmd])   
         xlabel('Time (s)');
         set(gcf,'Position',[1000 50 350 400]);
     end
 end
+
+if build_structure == 1
+    seriesResistance_thisFile = [firstSweepNum, relativeStartTime, seriesResistance]; 
+    if ~isfield(s_ephys.(dateRecorded_fieldName).(mouseName).(cellName), 'seriesResistance')
+        s_ephys.(dateRecorded_fieldName).(mouseName).(cellName).seriesResistance = seriesResistance_thisFile;
+    else
+        s_ephys.(dateRecorded_fieldName).(mouseName).(cellName).seriesResistance = [...
+            s_ephys.(dateRecorded_fieldName).(mouseName).(cellName).seriesResistance;...
+            seriesResistance_thisFile];
+    end
+end
+
