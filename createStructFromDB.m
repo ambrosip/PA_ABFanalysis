@@ -59,8 +59,8 @@ yMinNiceplot_main_CC = -100;
 yMaxNiceplot_main_CC = 50;
 yMinNiceplot_cmd_VC = -70;
 yMaxNiceplot_cmd_VC = -55;
-yMinNiceplot_cmd_CC = 300;
-yMaxNiceplot_cmd_CC = -200;
+yMinNiceplot_cmd_CC = -200;
+yMaxNiceplot_cmd_CC = 300;
 yMinNiceplot_light = -5;
 yMaxNiceplot_light = 10;
 
@@ -119,8 +119,8 @@ for date = unique(database.date_recorded)'
     dateRecorded_fieldName = strcat('d', num2str(date));
     for mouseNumber = unique(database(database.date_recorded == date,:).m)'    
         mouseName = sprintf('m%04d',mouseNumber); 
-        for cell = unique(convertCharsToStrings(database(database.m == mouseNumber,:).cell))'
-            s_ephys.(dateRecorded_fieldName).(mouseName).(cell) = [];
+        for cellName = unique(convertCharsToStrings(database(database.m == mouseNumber,:).cell))'
+            s_ephys.(dateRecorded_fieldName).(mouseName).(cellName) = [];
         end
     end
 end
@@ -128,7 +128,8 @@ end
 % iterate through every row
 for row=firstRow:rows
 
-    % ASSUMPTION: rec_type is written in the format "ON_CC_spont"
+    % ASSUMPTION: rec_type is written in the format "WC_CC_steps", or
+    % "ON_CC_spont", etc, but I'm trying NOT to rely on it for anything
     rec_type = cell2mat(database.rec_type(row));
     recordingType = rec_type;
 
@@ -265,7 +266,10 @@ for row=firstRow:rows
                     params.xMinInSec = xMinInSecNiceplot_spont_CC;
                     params.xMaxInSec = xMaxInSecNiceplot_spont_CC;
 
-                elseif contains(protocol_name, "pA") % ASSUMPTION
+                % ASSUMPTION: if protocol name does not contain any of the
+                % other words but contains "pA", this is a current step
+                % protocol
+                elseif contains(protocol_name, "pA") 
                     params.plot_cmd = 1;
                     params.example_sweep = example_sweep_steps;
                     params.xMinInSec = xMinInSecNiceplot_steps_CC;
@@ -381,19 +385,32 @@ for row=firstRow:rows
                 if strcmp(cell2mat(h.recChUnits(params.mainDataCh)),'pA')
                     getSeriesResistance;
                     disp('got series resistance')
-                end               
-            end
-            
-            % if applicable, get series resistance
-            if contains(protocol_name, "test pulse") & strcmp(cell2mat(h.recChUnits(params.mainDataCh)),'pA')
+                end   
+
+            % if applicable, get series resistance    
+            elseif contains(protocol_name, "test pulse") & strcmp(cell2mat(h.recChUnits(params.mainDataCh)),'pA')
                 getSeriesResistance;
                 disp('got series resistance')
-            end
 
-            % if applicable, get spont firing data
-            if contains(protocol_name, "spont")
+            % if applicable, get spont firing data    
+            elseif contains(protocol_name, "spont")
                 getSpontFiringData;
-                disp('got spont firing data')                                
+                disp('got spont firing data') 
+
+            % if aplicable, get current step data
+            elseif contains(protocol_name, "rheo")
+                getCurrentStepData;
+                disp('got current step data') 
+
+            % ASSUMPTION: if protocol name does not contain any of the
+            % other words but contains "pA", this is a current step
+            % protocol    
+            elseif contains(protocol_name, "pA")
+                getCurrentStepData;
+                disp('got current step data') 
+
+            else
+                disp('bruh I cannot figure out what kind of data this is from the protocol name')
             end
         end
     end

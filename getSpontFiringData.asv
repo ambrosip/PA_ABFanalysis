@@ -1,6 +1,5 @@
 %% get spont firing data from ON recordings - getSpontFiringData
 
-clear tsBySweep
 clear sweepNumberArrayBySweep
 clear firingRateMeanBySweep
 allTimeStampsBySweep = [];
