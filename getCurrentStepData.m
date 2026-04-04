@@ -17,7 +17,14 @@ if ~isempty(currentPulseStartInSecs)
     xMaxInSec = currentPulseStartInSecs + 2*currentPulseDurInSecs;
     params.xMinInSec = xMinInSec;
     params.xMaxInSec = xMaxInSec;
+    params.time_scaleBarSize = (params.xMaxInSec - params.xMinInSec)/10;
     % currentPulseIntervalInDataPts = currentPulseStartInDataPts:currentPulseEndInDataPts;
+
+    if params.time_scaleBarSize < 0.01
+        params.xMinInSec = xMinInSec - 100*params.time_scaleBarSize;
+        params.xMaxInSec = xMaxInSec + 100*params.time_scaleBarSize;
+        params.time_scaleBarSize = (params.xMaxInSec - params.xMinInSec)/10;
+    end
 else
     disp('no current pulses found')
     return;
@@ -82,55 +89,62 @@ for sweep=1:nSweeps
 end   
 
 if plotFigs == 1
-    % % plot all current steps
-    % figure('name', strcat(prefix, '_steps_all'),'Position',[0,0,1500,200])
-    %     t = tiledlayout(2,nSweeps);
-    %     t.GridSize = [2,nSweeps];
-    %     t.TileSpacing = 'compact';
-    %     t.Padding = 'compact';
-    %     t.TileIndexing = 'columnmajor';
-    %     title(prefix,'Interpreter','none')
-    %     for sweep=1:nSweeps
-    %         nexttile
-    %             plot(xAxis,yFiltered_All(:,params.cmdCh,sweep),'k','LineWidth',0.5)
-    %             axis([params.xMinInSec params.xMaxInSec params.yMin_cmd params.yMax_cmd])
-    %         nexttile
-    %             plot(xAxis,yFiltered_All(:,params.mainDataCh,sweep),'k','LineWidth',0.5)
-    %             hold on;
-    %             yline(params.minPeakHeight,'--')
-    %             hold off;
-    %             axis([params.xMinInSec params.xMaxInSec params.yMin params.yMax])
-    %     end
+    % plot all current steps
+    figure('name', strcat(prefix, '_steps_all'),'Position',[50,50,1500,250])
+        t = tiledlayout(2,nSweeps+1);
+        t.GridSize = [2,nSweeps+1];
+        t.TileSpacing = 'compact';
+        t.Padding = 'compact';
+        % t.TileIndexing = 'columnmajor';   
+        % title(prefix,'Interpreter','none');   
+        title(t,prefix,'Interpreter','none');
 
+        for sweep=1:nSweeps
+            nexttile
+            plot(xAxis,yFiltered_All(:,params.mainDataCh,sweep),'k','LineWidth',0.5)
+            hold on;
+            yline(params.minPeakHeight,'--')
+            hold off;
+            axis([params.xMinInSec params.xMaxInSec params.yMin params.yMax])
+            set(gca,'Visible','off');
+            % set(findall(gca,'type','text'),'visible','on'); % makes title visible again
+        end
 
-    if plot_QC == 1
-        % quality control of filter
-        figure('name',strcat(prefix,'_filter_qc'))
-            subplot(2,1,1)
-                plot(xAxis,yFilteredFirstSweep,'b')
-                hold on;
-                plot(xAxis,d(:,params.mainDataCh,1),'r')
-                hold off;
-                axis([params.xMinInSec params.xMaxInSec -inf inf])
-                ylabel(strcat(cell2mat(h.recChNames(params.mainDataCh)), " (", (cell2mat(h.recChUnits(params.mainDataCh))), ")"));
-                xlabel('Time (s)');
-                title(prefix,'Interpreter','none');
-            subplot(2,1,2)
-                plot(xAxis,yFilteredLastSweep,'b')
-                hold on;
-                plot(xAxis,d(:,params.mainDataCh,nSweeps),'r')
-                hold off;
-                axis([params.xMinInSec params.xMaxInSec -inf inf])
-                ylabel(strcat(cell2mat(h.recChNames(params.mainDataCh)), " (", (cell2mat(h.recChUnits(params.mainDataCh))), ")"));
-                xlabel('Time (s)');
+        nexttile
+        line([params.xMinInSec params.xMinInSec],[params.yMax params.yMax - params.data_y_scaleBarSize],'Color','k')
+        text(params.xMinInSec + params.time_scaleBarSize, params.yMax - params.data_y_scaleBarSize, strcat(num2str(params.data_y_scaleBarSize), " ", cell2mat(h.recChUnits(params.mainDataCh))))  
+        line([params.xMinInSec, params.xMinInSec + params.time_scaleBarSize],[params.yMin params.yMin],'Color','k')
+        text(params.xMinInSec, params.yMin + params.data_y_scaleBarSize, strcat(num2str(params.time_scaleBarSize), " s"))
+        axis([params.xMinInSec params.xMaxInSec params.yMin params.yMax])
+        set(gca,'Visible','off');
         
+        for sweep=1:nSweeps
+            nexttile
+            plot(xAxis,yFiltered_All(:,params.cmdCh,sweep),'k','LineWidth',0.5)
+            axis([params.xMinInSec params.xMaxInSec params.yMin_cmd params.yMax_cmd])
+            set(gca,'Visible','off');
+            title(strcat(num2str(currentPulseAmplitudeBySweep(sweep)), " ", cell2mat(h.recChUnits(params.mainDataCh))),'Interpreter','none');
+            set(findall(gca,'type','text'),'visible','on'); % makes title visible again
+        end
+
+        nexttile
+        line([params.xMinInSec params.xMinInSec],[params.yMin_cmd params.yMin_cmd + params.cmd_y_scaleBarSize],'Color','k')        
+        text(params.xMinInSec + params.time_scaleBarSize, params.yMin_cmd + params.cmd_y_scaleBarSize, strcat(num2str(params.cmd_y_scaleBarSize),  " ", cell2mat(h.recChUnits(params.cmdCh)))) 
+        axis([params.xMinInSec params.xMaxInSec params.yMin_cmd params.yMax_cmd])
+        set(gca,'Visible','off');
+        
+        
+
+
+    if plot_QC == 1        
         % quality control of found APs
-        figure('name', strcat(prefix, '_AP_qc'))
+        figure('name', strcat(prefix, '_filter_AP_qc'))
             subplot(2,1,1)
                 plot(xAxis,yFilteredExampleSweep)
                 hold on;
+                plot(xAxis,d(:,params.mainDataCh,params.example_sweep),'r') % unfiltered data
                 plot(locsExample,pksExample,'o')
-                yline(params.minPeakHeight)
+                yline(params.minPeakHeight, '--')
                 hold off;
                 axis([params.xMinInSec params.xMaxInSec params.yMin params.yMax])
                 ylabel(strcat(cell2mat(h.recChNames(params.mainDataCh)), " (", (cell2mat(h.recChUnits(params.mainDataCh))), ")"));
@@ -139,8 +153,9 @@ if plotFigs == 1
             subplot(2,1,2)
                 plot(xAxis,yFilteredLastSweep)
                 hold on;
+                plot(xAxis,d(:,params.mainDataCh,nSweeps),'r') % unfiltered data
                 plot(locsLast,pksLast,'o')
-                yline(params.minPeakHeight)
+                yline(params.minPeakHeight, '--')
                 hold off;
                 axis([params.xMinInSec params.xMaxInSec params.yMin params.yMax])
                 ylabel(strcat(cell2mat(h.recChNames(params.mainDataCh)), " (", (cell2mat(h.recChUnits(params.mainDataCh))), ")"));
@@ -156,15 +171,16 @@ if plotFigs == 1
             axis([params.xMinInSec params.xMaxInSec params.yMin params.yMax])
             set(gca,'Visible','off');
             % scale bars
-            line([params.xMaxInSec-2*params.time_scaleBarSize params.xMaxInSec],[params.yMin params.yMin],'Color','k')
+            line([params.xMinInSec, params.xMinInSec + params.time_scaleBarSize],[params.yMin params.yMin],'Color','k')
             line([params.xMaxInSec params.xMaxInSec],[params.yMin params.yMin + params.data_y_scaleBarSize],'Color','k')
-            text(params.xMaxInSec-2*params.time_scaleBarSize, params.yMin + params.data_y_scaleBarSize/2, strcat(num2str(params.time_scaleBarSize), " s"))                       
+            text(params.xMinInSec, params.yMin + params.data_y_scaleBarSize, strcat(num2str(params.time_scaleBarSize), " s"))                       
             text(params.xMaxInSec-2*params.time_scaleBarSize, params.yMin + params.data_y_scaleBarSize, strcat(num2str(params.data_y_scaleBarSize), " ", cell2mat(h.recChUnits(params.mainDataCh))))  
             % -60 mV line
-            yline(-60,'Color',[0, 0, 0, 0.5],'LineWidth',0.1)
+            yline(-60,'--','Color',[0, 0, 0, 0.5],'LineWidth',0.1)
             % 0 mV line
-            yline(0,'Color',[0, 0, 0, 0.5],'LineWidth',0.1)
-            text(params.xMinInSec, params.yMin + 10, "lines @ 0 mV & -60 mV") 
+            yline(0,'--','Color',[0, 0, 0, 0.5],'LineWidth',0.1)
+            text(params.xMinInSec, -40, "-60 mV") 
+            text(params.xMinInSec, 20, "0 mV") 
             title(prefix,'Interpreter','none');
             set(findall(gca, 'type', 'text'), 'visible', 'on'); % Makes the title visible again
         subplot(3,1,2)
@@ -173,9 +189,9 @@ if plotFigs == 1
             axis([params.xMinInSec params.xMaxInSec params.yMin_cmd params.yMax_cmd])
             set(gca,'Visible','off');
             % scale bars
-            line([params.xMaxInSec-2*params.time_scaleBarSize params.xMaxInSec],[params.yMin_cmd params.yMin_cmd],'Color','k')
+            line([params.xMinInSec, params.xMinInSec + params.time_scaleBarSize],[params.yMin_cmd params.yMin_cmd],'Color','k')
             line([params.xMaxInSec params.xMaxInSec],[params.yMin_cmd params.yMin_cmd + params.cmd_y_scaleBarSize],'Color','k')
-            text(params.xMaxInSec-2*params.time_scaleBarSize, params.yMin_cmd + params.cmd_y_scaleBarSize/2, strcat(num2str(params.time_scaleBarSize), " s"))
+            text(params.xMinInSec, params.yMin_cmd + params.cmd_y_scaleBarSize, strcat(num2str(params.time_scaleBarSize), " s"))
             text(params.xMaxInSec-2*params.time_scaleBarSize, params.yMin_cmd + params.cmd_y_scaleBarSize, strcat(num2str(params.cmd_y_scaleBarSize),  " ", cell2mat(h.recChUnits(params.cmdCh))))                
         subplot(3,1,3)
             % plot AP raster for all sweeps
@@ -201,15 +217,21 @@ if plotFigs == 1
             axis([params.xMinInSec params.xMaxInSec params.yMin params.yMax])
             set(gca,'Visible','off');
             % scale bars
-             line([params.xMaxInSec-params.time_scaleBarSize params.xMaxInSec],[params.yMin params.yMin],'Color','k')
+            line([params.xMinInSec, params.xMinInSec + params.time_scaleBarSize],[params.yMin params.yMin],'Color','k')
             line([params.xMaxInSec params.xMaxInSec],[params.yMin params.yMin + params.data_y_scaleBarSize],'Color','k')
-            text(params.xMaxInSec-2*params.time_scaleBarSize, params.yMin + params.data_y_scaleBarSize/2, strcat(num2str(params.time_scaleBarSize), " s"))
-            text(params.xMaxInSec-2*params.time_scaleBarSize, params.yMin + params.data_y_scaleBarSize, strcat(num2str(params.data_y_scaleBarSize), " ", cell2mat(h.recChUnits(params.mainDataCh))))   
+            text(params.xMinInSec, params.yMin + params.data_y_scaleBarSize, strcat(num2str(params.time_scaleBarSize), " s"))                       
+            text(params.xMaxInSec-2*params.time_scaleBarSize, params.yMin + params.data_y_scaleBarSize, strcat(num2str(params.data_y_scaleBarSize), " ", cell2mat(h.recChUnits(params.mainDataCh))))  
+            % line([params.xMaxInSec-params.time_scaleBarSize params.xMaxInSec],[params.yMin params.yMin],'Color','k')
+            % line([params.xMaxInSec params.xMaxInSec],[params.yMin params.yMin + params.data_y_scaleBarSize],'Color','k')
+            % text(params.xMaxInSec-2*params.time_scaleBarSize, params.yMin + params.data_y_scaleBarSize/2, strcat(num2str(params.time_scaleBarSize), " s"))
+            % text(params.xMaxInSec-2*params.time_scaleBarSize, params.yMin + params.data_y_scaleBarSize, strcat(num2str(params.data_y_scaleBarSize), " ", cell2mat(h.recChUnits(params.mainDataCh))))   
             % -60 mV line
-            yline(-60,'Color',[0, 0, 0, 0.5],'LineWidth',0.1)
-            % 0 mv line
-            yline(0,'Color',[0, 0, 0, 0.5],'LineWidth',0.1)
-            text(params.xMinInSec, params.yMin + 10, "lines @ 0 mV & -60 mV")  
+            yline(-60,'--','Color',[0, 0, 0, 0.5],'LineWidth',0.1)
+            % 0 mV line
+            yline(0,'--','Color',[0, 0, 0, 0.5],'LineWidth',0.1)
+            text(params.xMinInSec, -40, "-60 mV") 
+            text(params.xMinInSec, 20, "0 mV") 
+            % text(params.xMinInSec, params.yMin + 10, "lines @ 0 mV & -60 mV")  
             title(prefix,'Interpreter','none');
             set(findall(gca, 'type', 'text'), 'visible', 'on'); % Makes the title visible again
         subplot(2,1,2)

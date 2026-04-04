@@ -9,7 +9,7 @@ saveDir = "C:\Users\ambrosi\OHSU Dropbox\Priscilla Ambrosi\Dropbox - Moss Lab\La
 firstRow = 1;          % set firstRow to be analyzed - remember to account for header when counting rows!
 analyzeOnlyOneRow = 0;  % 1 (yes) or 0 (no)
 saveFigs = 1;
-saveData = 0;
+saveData = 1;
 plot_QC = 1;
 plotFigs = 1;
 ymaxhist = 20;          % used by "getSpontFiringRate"
@@ -70,7 +70,7 @@ example_sweep_spont = 1;
 example_sweep_opto = 1;
 
 % scale bars
-cmd_y_scaleBarSize_WC_CC = 25;    
+cmd_y_scaleBarSize_WC_CC = 100;    
 data_y_scaleBarSize_WC_CC = 20;   
 time_scaleBarSize_WC_CC = 0.25;      % in s
 cmd_y_scaleBarSize_WC_VC = 25;    
@@ -425,6 +425,8 @@ end
 %% Save workspace
 
 % save workspace variables
-matFileName = strcat(analysisDate, '_ephys_db');
-save(fullfile(saveDir,matFileName));     
-disp('I saved the mat file')
+if saveData == 1
+    matFileName = strcat(analysisDate, '_ephys_db');
+    save(fullfile(saveDir,matFileName));     
+    disp('I saved the mat file')
+end
